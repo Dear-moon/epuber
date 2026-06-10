@@ -1,0 +1,9 @@
+name: lightnovel_bridge
+description: SignalR bridge for lightnovel.app chapter fetching
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  http: ^1.0.0

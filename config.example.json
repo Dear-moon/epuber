@@ -1,0 +1,7 @@
+{
+  "lightnovel": {
+    "refresh_token": "YOUR_REFRESH_TOKEN_HERE"
+  },
+  "fetch_dir": "./fetch",
+  "edge_path": null
+}

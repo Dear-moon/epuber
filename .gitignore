@@ -1,0 +1,29 @@
+# Private configuration (contains refresh tokens)
+config.json
+
+# Fetch memory (personal reading history)
+fetch_memory.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Downloaded novels
+fetch/
+
+# Temp files
+_temp_*.woff2
+
+# Dart build artifacts
+scripts/dart_bridge/.dart_tool/
+scripts/dart_bridge/pubspec.lock
+scripts/dart_bridge/*.exe
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
