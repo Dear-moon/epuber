@@ -18,7 +18,10 @@ _temp_*.woff2
 # Dart build artifacts
 scripts/dart_bridge/.dart_tool/
 scripts/dart_bridge/pubspec.lock
-scripts/dart_bridge/*.exe
+# Note: lightnovel_bridge.exe is intentionally tracked (pre-compiled for no-Dart-SDK setup)
+
+# Dart dev/test files (not for distribution)
+scripts/dart_bridge/bin/*test*.dart
 
 # OS files
 .DS_Store

@@ -15,6 +15,7 @@ import json
 import time
 import argparse
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Fix Windows terminal encoding for CJK output
 if sys.platform == 'win32':
@@ -23,6 +24,35 @@ if sys.platform == 'win32':
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
     except Exception:
         pass
+
+MEMORY_FILE = Path(__file__).resolve().parent.parent / "fetch_memory.json"
+
+
+def _load_memory():
+    if MEMORY_FILE.exists():
+        return json.loads(MEMORY_FILE.read_text(encoding='utf-8'))
+    return {}
+
+
+def _save_memory(data):
+    MEMORY_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def _mark_novel(source, novel_id, title, chapter_count):
+    """Record novel fetch in memory."""
+    try:
+        data = _load_memory()
+        key = f'novelia:{source}:{novel_id}'
+        data[key] = {
+            'title': title,
+            'source': source,
+            'chapter_count': chapter_count,
+            'first_fetch': data.get(key, {}).get('first_fetch', time.strftime('%Y-%m-%d %H:%M')),
+            'last_fetch': time.strftime('%Y-%m-%d %H:%M'),
+        }
+        _save_memory(data)
+    except Exception:
+        pass  # memory is non-critical
 
 try:
     import requests
@@ -66,8 +96,8 @@ def parse_url(url):
       https://n.novelia.cc/novel/hameln/68239 → ('hameln', '68239')
       https://syosetu.org/novel/68239/      → ('syosetu', '68239')
     """
-    # novelia.cc: /novel/{source}/{id}
-    m = re.search(r'novelia\.cc/novel/(\w+)/(\d+)', url)
+    # novelia.cc: /novel/{source}/{id}  (id may be alphanumeric, e.g. n6993lg)
+    m = re.search(r'novelia\.cc/novel/(\w+)/([\w\d]+)', url)
     if m:
         return m.group(1), m.group(2)
 
@@ -132,13 +162,27 @@ def fetch_chapter(source, novel_id, chapter_id, translation, session):
 #  Main fetcher
 # ============================================================
 
-def fetch_novel(url, translation='sakura', delay=0.3):
+def _fetch_one_chapter(source, novel_id, ch_id, translation, delay, ch_title_zh):
+    """Fetch a single chapter in its own session (thread-safe)."""
+    session = create_session()
+    try:
+        ch_data = fetch_chapter(source, novel_id, ch_id, translation, session)
+        return ch_data, None
+    except Exception as e:
+        return None, str(e)
+    finally:
+        if delay > 0:
+            time.sleep(delay)
+
+
+def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
     """Fetch complete novel from a supported web source.
 
     Args:
         url: Novel index URL (novelia.cc or syosetu.org)
         translation: which translation to fetch ('jp', 'youdao', 'gpt', 'sakura')
-        delay: seconds to wait between chapter requests (be polite)
+        delay: seconds to wait between requests per worker (be polite)
+        workers: concurrent download threads (1 = sequential)
 
     Returns:
         (combined_text, metadata_dict)
@@ -181,22 +225,55 @@ def fetch_novel(url, translation='sakura', delay=0.3):
     print(f"  Chapters: {len(toc)}")
     print(f"  Translation: {translation} ({TRANSLATIONS[translation]})")
 
-    # Build combined text
+    # Separate TOC items needing API calls from section headers
+    chapter_items = []   # [(toc_index, ch)]
+    for i, ch in enumerate(toc):
+        if 'chapterId' in ch:
+            chapter_items.append((i, ch))
+
+    # Fetch chapters in parallel
+    results = {}  # toc_index -> (ch_data, error)
+    if workers > 1 and chapter_items:
+        print(f"  Workers: {workers} (parallel)")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {}
+            for idx, ch in chapter_items:
+                ch_id = ch['chapterId']
+                ch_title = ch.get('titleZh', ch.get('titleJp', f'Chapter {ch_id}'))
+                f = executor.submit(_fetch_one_chapter, source, novel_id,
+                                   ch_id, translation, delay, ch_title)
+                futures[f] = (idx, ch_title)
+
+            done = 0
+            for f in as_completed(futures):
+                idx, ch_title = futures[f]
+                ch_data, error = f.result()
+                results[idx] = (ch_data, error)
+                done += 1
+                status = 'OK' if not error else f'FAILED: {error}'
+                print(f"  [{done}/{len(chapter_items)}] {ch_title[:50]}... {status}", flush=True)
+    else:
+        # Sequential mode — reuse session
+        for idx, ch in chapter_items:
+            ch_id = ch['chapterId']
+            ch_title = ch.get('titleZh', ch.get('titleJp', f'Chapter {ch_id}'))
+            ch_data, error = _fetch_one_chapter(source, novel_id, ch_id, translation, 0, ch_title)
+            results[idx] = (ch_data, error)
+            status = 'OK' if not error else f'FAILED: {error}'
+            print(f"  [{len(results)}/{len(chapter_items)}] {ch_title[:50]}... {status}", flush=True)
+
+    # Build combined text in TOC order
     parts = []
-    # Add metadata header
     parts.append(f"# {meta['title']}")
     parts.append(f"作者: {meta['author']}")
     if meta.get('introduction_zh'):
         parts.append(f"\n简介: {meta['introduction_zh']}")
     parts.append('')
 
-    # Fetch each chapter
     ch_count = 0
     for i, ch in enumerate(toc):
-        # TOC items without chapterId are section headers
         if 'chapterId' not in ch:
             section_title = ch.get('titleZh', ch.get('titleJp', ''))
-            print(f"  [{i+1}/{len(toc)}] [{section_title}] (section header)")
             parts.append(f'\n\n# {section_title}\n')
             continue
 
@@ -204,26 +281,21 @@ def fetch_novel(url, translation='sakura', delay=0.3):
         ch_title_zh = ch.get('titleZh', ch.get('titleJp', f'Chapter {ch_id}'))
         ch_count += 1
 
-        print(f"  [{i+1}/{len(toc)}] {ch_title_zh[:50]}...", end=' ', flush=True)
-        try:
-            ch_data = fetch_chapter(source, novel_id, ch_id, translation, session)
-            # Build chapter text
-            parts.append(f'\n\n第{ch_count}章 {ch_title_zh}\n')
-            for para in ch_data['paragraphs']:
-                para = para.strip()
-                if para:
-                    parts.append(para)
-                else:
-                    parts.append('')  # preserve blank lines within chapters
-            print('OK')
-        except Exception as e:
-            print(f'FAILED: {e}')
-            parts.append(f'\n\n第{ch_count}章 {ch_title_zh}\n')
-            parts.append(f'[获取失败: {e}]')
-
-        # Be polite to the server
-        if delay > 0:
-            time.sleep(delay)
+        if i in results:
+            ch_data, error = results[i]
+            if ch_data and not error:
+                parts.append(f'\n\n第{ch_count}章 {ch_title_zh}\n')
+                for para in ch_data['paragraphs']:
+                    para = para.strip()
+                    if para:
+                        parts.append(para)
+                    else:
+                        parts.append('')
+            else:
+                parts.append(f'\n\n第{ch_count}章 {ch_title_zh}\n')
+                parts.append(f'[获取失败: {error}]')
+        else:
+            parts.append(f'\n\n第{ch_count}章 {ch_title_zh}\n[获取失败: 未知错误]')
 
     combined = '\n'.join(parts)
     return combined, meta
@@ -240,7 +312,7 @@ def main():
         epilog='''
 Examples:
   python web_fetch.py https://n.novelia.cc/novel/hameln/68239
-  python web_fetch.py https://n.novelia.cc/novel/hameln/68239 -t gpt -o novel.txt
+  python web_fetch.py https://n.novelia.cc/novel/hameln/68239 -t gpt -o novel.txt -w 20
   python web_fetch.py https://syosetu.org/novel/68239/ -o novel.txt
         ''')
     parser.add_argument('url', help='Novel index page URL (novelia.cc or syosetu.org)')
@@ -250,10 +322,18 @@ Examples:
                         help='Translation source (default: sakura)')
     parser.add_argument('-d', '--delay', type=float, default=0.3,
                         help='Delay between chapter requests in seconds (default: 0.3)')
+    parser.add_argument('-w', '--workers', type=int, default=5,
+                        help='Concurrent download threads (default: 5, 1 = sequential)')
     args = parser.parse_args()
 
     print(f"Fetching: {args.url}")
-    text, meta = fetch_novel(args.url, translation=args.translation, delay=args.delay)
+    text, meta = fetch_novel(args.url, translation=args.translation,
+                            delay=args.delay, workers=args.workers)
+
+    # Record in fetch memory
+    src, nid = parse_url(args.url)
+    ch_count = len([c for c in meta.get('toc', []) if 'chapterId' in c])
+    _mark_novel(src, nid, meta['title'], ch_count)
 
     print(f"\nTitle: {meta['title']}")
     print(f"Author: {meta['author']}")

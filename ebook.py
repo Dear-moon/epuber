@@ -185,8 +185,104 @@ def cmd_syosetu(args):
 
 
 def cmd_novelia(args):
-    """novelia.cc API 抓取"""
-    _run('web_fetch.py', *args)
+    """novelia.cc API 抓取 → 自动转 EPUB + 清理临时 TXT"""
+    force = '--force' in args
+    no_epub = '--no-epub' in args
+
+    # Extract -o, -t, -w, -d flags
+    output_epub = None
+    translation = None
+    workers = None
+    delay = None
+    clean = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ('-o', '--output') and i + 1 < len(args):
+            output_epub = args[i + 1]; i += 1
+        elif a in ('-t', '--translation') and i + 1 < len(args):
+            translation = args[i + 1]; i += 1
+        elif a in ('-w', '--workers') and i + 1 < len(args):
+            workers = args[i + 1]; i += 1
+        elif a in ('-d', '--delay') and i + 1 < len(args):
+            delay = args[i + 1]; i += 1
+        elif a in ('--force', '--no-epub'):
+            pass
+        else:
+            clean.append(a)
+        i += 1
+
+    if not clean:
+        print("ERROR: URL required"); sys.exit(1)
+
+    url = clean[0]
+
+    # Fetch to temp TXT
+    import tempfile
+    fetch_dir = get_fetch_dir()
+    tmp_txt = str(fetch_dir / f'_fetch_{os.getpid()}.txt')
+
+    fetch_args = [url, '-o', tmp_txt]
+    if translation:
+        fetch_args += ['-t', translation]
+    if workers:
+        fetch_args += ['-w', workers]
+    if delay:
+        fetch_args += ['-d', delay]
+
+    print(f"Fetching: {url}")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / 'web_fetch.py')] + fetch_args
+    )
+    if result.returncode != 0:
+        print("Fetch failed"); sys.exit(result.returncode)
+
+    if not os.path.exists(tmp_txt):
+        print("ERROR: TXT not generated"); sys.exit(1)
+
+    # Parse metadata from web_fetch.py output for author/title
+    # We read the TXT header to get title and author
+    with open(tmp_txt, 'r', encoding='utf-8') as f:
+        header = f.read(500)
+    title_match = re.search(r'^# (.+)', header, re.MULTILINE)
+    author_match = re.search(r'作者: (.+)', header)
+    title = title_match.group(1).strip() if title_match else 'Untitled'
+    author = author_match.group(1).strip() if author_match else ''
+
+    if no_epub:
+        # Just keep the TXT where user wants it
+        if output_epub:
+            import shutil
+            shutil.move(tmp_txt, output_epub)
+            print(f"TXT saved: {output_epub}")
+        else:
+            print(f"TXT saved: {tmp_txt}")
+        return
+
+    # Auto-convert to EPUB
+    safe = re.sub(r'[<>:\"/\\|?*]', '_', title)[:80]
+    if output_epub is None:
+        epub_path = str(fetch_dir.parent / f'{safe}.epub')
+    else:
+        epub_path = output_epub
+
+    author_flag = ['--author', author] if author else []
+    subprocess.run(
+        [sys.executable, str(SCRIPTS / 'convert.py'), tmp_txt, '-o', epub_path,
+         '--title', title] + author_flag
+    )
+
+    # Clean up temp TXT
+    try:
+        os.remove(tmp_txt)
+    except Exception:
+        pass
+
+    if os.path.exists(epub_path):
+        size_mb = os.path.getsize(epub_path) / (1024*1024)
+        print(f"EPUB: {size_mb:.1f} MB → {epub_path}")
+    else:
+        print(f"ERROR: EPUB not created")
 
 
 def cmd_wenku8(args):
