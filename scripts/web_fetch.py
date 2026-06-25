@@ -90,13 +90,16 @@ def create_session():
 
 
 def parse_url(url):
-    """Parse a novelia.cc or syosetu.org URL into (source, novel_id).
+    """Parse a novel URL into (source, novel_id) for the novelia.cc API.
 
-    Examples:
-      https://n.novelia.cc/novel/hameln/68239 → ('hameln', '68239')
-      https://syosetu.org/novel/68239/      → ('syosetu', '68239')
+    Supported formats:
+      https://n.novelia.cc/novel/hameln/<ID>   → ('hameln', '<ID>')
+      https://novelia.cc/novel/syosetu/<ID>   → ('syosetu', '<ID>')
+      https://syosetu.org/novel/<ID>/          → ('syosetu', '<ID>')
+      https://novel18.syosetu.com/<ID>/        → ('narou', '<ID>')
+      https://ncode.syosetu.com/<ID>/          → ('narou', '<ID>')
     """
-    # novelia.cc: /novel/{source}/{id}  (id may be alphanumeric, e.g. n6993lg)
+    # novelia.cc: /novel/{source}/{id}  (id may be numeric or alphanumeric)
     m = re.search(r'novelia\.cc/novel/(\w+)/([\w\d]+)', url)
     if m:
         return m.group(1), m.group(2)
@@ -106,7 +109,13 @@ def parse_url(url):
     if m:
         return 'syosetu', m.group(1)
 
-    raise ValueError(f"Cannot parse URL: {url}. Expected novelia.cc or syosetu.org format.")
+    # syosetu.com (narou, including novel18/ncode subdomains): /{id}/
+    m = re.search(r'syosetu\.com/(n\w+?)(?:/|\b)', url)
+    if m:
+        # Try 'narou' source first, fall back to 'syosetu'
+        return 'narou', m.group(1)
+
+    raise ValueError(f"Cannot parse URL: {url}. Expected novelia.cc, syosetu.org, or syosetu.com format.")
 
 
 def fetch_metadata(source, novel_id, session):
@@ -175,6 +184,42 @@ def _fetch_one_chapter(source, novel_id, ch_id, translation, delay, ch_title_zh)
             time.sleep(delay)
 
 
+def _fetch_batch(chapter_items, source, novel_id, translation, delay, workers, label=""):
+    """Fetch a batch of chapters, returning {toc_index: (ch_data, error)}."""
+    results = {}
+    prefix = f"  [{label}] " if label else "  "
+
+    if workers > 1 and len(chapter_items) > 1:
+        print(f"{prefix}Workers: {workers}, chapters: {len(chapter_items)}")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {}
+            for idx, ch in chapter_items:
+                ch_id = ch['chapterId']
+                ch_title = ch.get('titleZh', ch.get('titleJp', f'Chapter {ch_id}'))
+                f = executor.submit(_fetch_one_chapter, source, novel_id,
+                                   ch_id, translation, delay, ch_title)
+                futures[f] = (idx, ch_title)
+
+            done = 0
+            for f in as_completed(futures):
+                idx, ch_title = futures[f]
+                ch_data, error = f.result()
+                results[idx] = (ch_data, error)
+                done += 1
+                status = 'OK' if not error else f'FAILED'
+                print(f"  [{done}/{len(chapter_items)}] {ch_title[:50]}... {status}", flush=True)
+    else:
+        for idx, ch in chapter_items:
+            ch_id = ch['chapterId']
+            ch_title = ch.get('titleZh', ch.get('titleJp', f'Chapter {ch_id}'))
+            ch_data, error = _fetch_one_chapter(source, novel_id, ch_id, translation, delay, ch_title)
+            results[idx] = (ch_data, error)
+            status = 'OK' if not error else f'FAILED'
+            print(f"  [{len(results)}/{len(chapter_items)}] {ch_title[:50]}... {status}", flush=True)
+
+    return results
+
+
 def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
     """Fetch complete novel from a supported web source.
 
@@ -195,10 +240,12 @@ def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
     try:
         meta = fetch_metadata(source, novel_id, session)
     except RuntimeError:
-        # Try alternate source mapping for syosetu.org
-        if source == 'syosetu':
-            print("  Direct syosetu fetch failed. Trying alternate sources...")
-            for alt_source in ['narou', 'hameln']:
+        if source in ('syosetu', 'narou'):
+            print(f"  Direct {source} fetch failed. Trying alternate sources...")
+            # Mutual fallback: narou ↔ syosetu, plus hameln for hameln-sourced syosetu URLs
+            fallbacks = ['narou', 'syosetu', 'hameln']
+            fallbacks = [s for s in fallbacks if s != source]  # don't retry same source
+            for alt_source in fallbacks:
                 try:
                     meta = fetch_metadata(alt_source, novel_id, session)
                     source = alt_source
@@ -231,36 +278,29 @@ def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
         if 'chapterId' in ch:
             chapter_items.append((i, ch))
 
-    # Fetch chapters in parallel
-    results = {}  # toc_index -> (ch_data, error)
-    if workers > 1 and chapter_items:
-        print(f"  Workers: {workers} (parallel)")
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {}
-            for idx, ch in chapter_items:
-                ch_id = ch['chapterId']
-                ch_title = ch.get('titleZh', ch.get('titleJp', f'Chapter {ch_id}'))
-                f = executor.submit(_fetch_one_chapter, source, novel_id,
-                                   ch_id, translation, delay, ch_title)
-                futures[f] = (idx, ch_title)
+    # First pass: parallel fetch
+    results = _fetch_batch(chapter_items, source, novel_id, translation, delay, workers)
 
-            done = 0
-            for f in as_completed(futures):
-                idx, ch_title = futures[f]
-                ch_data, error = f.result()
-                results[idx] = (ch_data, error)
-                done += 1
-                status = 'OK' if not error else f'FAILED: {error}'
-                print(f"  [{done}/{len(chapter_items)}] {ch_title[:50]}... {status}", flush=True)
+    # Retry loop: retry failed chapters up to 3 times with increasing backoff
+    retry_delays = [1.0, 2.0, 4.0]
+    for retry_round, retry_delay in enumerate(retry_delays, 1):
+        failed = [(idx, ch) for idx, ch in chapter_items
+                  if idx in results and results[idx][1] is not None]
+        if not failed:
+            break
+
+        print(f"\n  Retry round {retry_round}: {len(failed)} failed chapters "
+              f"(delay={retry_delay}s, sequential)...", flush=True)
+        retry_results = _fetch_batch(failed, source, novel_id, translation,
+                                     retry_delay, workers=1, label=f"retry{retry_round}")
+        results.update(retry_results)
+
+    # Final failure count
+    final_failed = sum(1 for v in results.values() if v[1] is not None)
+    if final_failed > 0:
+        print(f"\n  {final_failed} chapter(s) failed after all retries.")
     else:
-        # Sequential mode — reuse session
-        for idx, ch in chapter_items:
-            ch_id = ch['chapterId']
-            ch_title = ch.get('titleZh', ch.get('titleJp', f'Chapter {ch_id}'))
-            ch_data, error = _fetch_one_chapter(source, novel_id, ch_id, translation, 0, ch_title)
-            results[idx] = (ch_data, error)
-            status = 'OK' if not error else f'FAILED: {error}'
-            print(f"  [{len(results)}/{len(chapter_items)}] {ch_title[:50]}... {status}", flush=True)
+        print(f"\n  All chapters fetched successfully.")
 
     # Build combined text in TOC order
     parts = []
@@ -311,9 +351,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  python web_fetch.py https://n.novelia.cc/novel/hameln/68239
-  python web_fetch.py https://n.novelia.cc/novel/hameln/68239 -t gpt -o novel.txt -w 20
-  python web_fetch.py https://syosetu.org/novel/68239/ -o novel.txt
+  python web_fetch.py https://n.novelia.cc/novel/hameln/<ID>
+  python web_fetch.py https://n.novelia.cc/novel/hameln/<ID> -t gpt -o novel.txt -w 20
+  python web_fetch.py https://syosetu.org/novel/<ID>/ -o novel.txt
+  python web_fetch.py https://novel18.syosetu.com/<ID>/ -o novel.txt
         ''')
     parser.add_argument('url', help='Novel index page URL (novelia.cc or syosetu.org)')
     parser.add_argument('-o', '--output', help='Output TXT file path')

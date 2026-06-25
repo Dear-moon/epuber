@@ -3,7 +3,7 @@
 Fetch memory — tracks which chapters of which novels have been fetched.
 Stored as JSON at ~/.claude/skills/txt-to-epub/fetch_memory.json
 
-Keys: f"{source}:{novel_id}" — e.g. "lightnovel:17028", "syosetu:68239"
+Keys: f"{source}:{novel_id}" — e.g. "lightnovel:<BID>", "syosetu:<ID>"
 """
 
 import json, time

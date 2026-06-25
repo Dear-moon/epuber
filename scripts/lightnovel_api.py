@@ -7,7 +7,7 @@ Usage:
   1. Install Dart SDK: winget install Google.DartSDK
   2. Fill in REFRESH_TOKEN below (from browser → DevTools → Application → Local Storage →
      key: sb-yywiuxedvyfxdpznoyqy-auth-token)
-  3. python lightnovel_api.py --bid 17028 --chapter 8
+  3. python lightnovel_api.py --bid <BID> --chapter <CID>
 """
 
 import sys, io, json, re, subprocess, argparse, time

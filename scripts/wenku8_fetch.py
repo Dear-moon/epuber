@@ -4,7 +4,7 @@ Wenku8.net fetcher via CDP. Auto-launches Edge, bypasses Cloudflare.
 Supports TXT mode and HTML mode (with illustration downloading).
 
 Usage:
-  python wenku8_fetch.py -u https://www.wenku8.net/novel/3/3988/index.htm
+  python wenku8_fetch.py -u https://www.wenku8.net/novel/<CAT>/<ID>/index.htm
   python wenku8_fetch.py -u ... --html "D:/output/dir"   # HTML mode with illustrations
   python wenku8_fetch.py -u ... --start 1 --end 5
   python wenku8_fetch.py -u ... --visible

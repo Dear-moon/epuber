@@ -5,7 +5,7 @@ Once built, the table is cached in the book directory and reused.
 
 Usage:
   # Build decode map for a specific book (fetches font + sample text + OCR)
-  python build_decode_map.py --bid 17028
+  python build_decode_map.py --bid <BID>
 
   # Decode text using cached map
   python build_decode_map.py --decode --map font_map.json --text "..."

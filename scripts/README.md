@@ -12,8 +12,8 @@ setup.bat
 #    复制 key: sb-yywiuxedvyfxdpznoyqy-auth-token 的值
 
 # 4. 开始使用
-python ebook.py lightnovel --bid 17028 --chapter 8 --html     # 单章
-python ebook.py lightnovel --bid 17028 --all                   # 全部章节
+python ebook.py lightnovel --bid <BID> --chapter <CID> --html     # 单章
+python ebook.py lightnovel --bid <BID> --all                   # 全部章节
 ```
 
 ## 快速使用
@@ -22,23 +22,23 @@ python ebook.py lightnovel --bid 17028 --all                   # 全部章节
 cd ~/.claude/skills/txt-to-epub
 
 # 抓取 lightnovel.app
-python ebook.py lightnovel --bid 17028 --chapter 8 --html     # 单章
-python ebook.py lightnovel --bid 17028 --all                   # 全部章节
+python ebook.py lightnovel --bid <BID> --chapter <CID> --html     # 单章
+python ebook.py lightnovel --bid <BID> --all                   # 全部章节
 
 # 抓取 syosetu.org
-python ebook.py syosetu -u "https://syosetu.org/novel/68239/" --html "dir"
+python ebook.py syosetu -u "https://syosetu.org/novel/<ID>/" --html "dir"
 
 # 抓取 novelia.cc
-python ebook.py novelia "https://n.novelia.cc/novel/hameln/68239" -o novel.txt
+python ebook.py novelia "https://n.novelia.cc/novel/hameln/<ID>" -o novel.txt
 
 # 抓取 wenku8.net
-python ebook.py wenku8 "https://www.wenku8.net/novel/3/3988/index.htm" -o novel.txt
+python ebook.py wenku8 "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm" -o novel.txt
 
 # TXT → EPUB
 python ebook.py convert "novel.txt" -o "novel.epub" --title "书名" --author "作者"
 
 # HTML 目录 → 字体嵌入 EPUB
-python ebook.py pack "D:/.../Sword Art Online刀剑神域 Progressive 009" --author "川原礫"
+python ebook.py pack "D:/.../<BOOK_DIR>" --author "Author"
 
 # 字体解码（离线快照）
 python ebook.py decode --html-file page.html --font-url "https://..."
@@ -106,7 +106,7 @@ python scripts/convert.py "novel.txt" -o "novel.epub" --title "书名" --author 
 ### 2. novelia.cc API 抓取（最快，~30s/100章）
 
 ```bash
-python scripts/web_fetch.py "https://n.novelia.cc/novel/hameln/68239" -o novel.txt
+python scripts/web_fetch.py "https://n.novelia.cc/novel/hameln/<ID>" -o novel.txt
 python scripts/convert.py novel.txt -o novel.epub --title "书名"
 ```
 
@@ -116,11 +116,11 @@ python scripts/convert.py novel.txt -o novel.epub --title "书名"
 
 ```bash
 # TXT 模式
-python scripts/syosetu_fetch.py -u "https://syosetu.org/novel/68239/" -o novel.txt
+python scripts/syosetu_fetch.py -u "https://syosetu.org/novel/<ID>/" -o novel.txt
 python scripts/convert.py novel.txt -o novel.epub --title "书名"
 
 # HTML 模式（含插图下载）
-python scripts/syosetu_fetch.py -u "https://syosetu.org/novel/68239/" \
+python scripts/syosetu_fetch.py -u "https://syosetu.org/novel/<ID>/" \
     --html "D:/path/to/output" --delay 0.5
 
 # 然后打包 EPUB
@@ -132,7 +132,7 @@ python scripts/html2epub_font.py "D:/path/to/output" -o "output.epub" --author "
 ### 4. wenku8.net CDP 抓取
 
 ```bash
-python scripts/wenku8_fetch.py -u "https://www.wenku8.net/novel/3/3988/index.htm" -o novel.txt
+python scripts/wenku8_fetch.py -u "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm" -o novel.txt
 python scripts/convert.py novel.txt -o novel.epub --title "书名"
 ```
 
@@ -147,19 +147,19 @@ python scripts/lightnovel_decode.py --html "<div>...</div>" --font-url "https://
 
 ```bash
 # 单章 → 自动存入 D:\YyumekO\Documents\ebook\fetch\{书名}\
-python scripts/lightnovel_api.py --bid 17028 --chapter 8 --html
+python scripts/lightnovel_api.py --bid <BID> --chapter <CID> --html
 
 # 指定路径
-python scripts/lightnovel_api.py --bid 17028 --chapter 8 --html my.html
+python scripts/lightnovel_api.py --bid <BID> --chapter <CID> --html my.html
 
 # 批量抓取全部章节
 for ch in $(seq 1 18); do
-  python scripts/lightnovel_api.py --bid 17028 --chapter $ch --html
+  python scripts/lightnovel_api.py --bid <BID> --chapter <CID> --html
 done
 
 # HTML → 字体嵌入 EPUB（WOFF2 自动转 TTF，兼容更广）
-python scripts/html2epub_font.py "D:\YyumekO\Documents\ebook\fetch\Sword Art Online刀剑神域 Progressive 009" \
-    -o "SAO_Progressive_009.epub" --author "川原礫"
+python scripts/html2epub_font.py "D:\YyumekO\Documents\ebook\fetch\<BOOK_DIR>" \
+    -o "<OUTPUT>.epub" --author "Author"
 
 # HTML → 单章纯文本（VLM OCR，需要 vision-reader skill）
 python scripts/html2txt.py "chapter.html"

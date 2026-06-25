@@ -4,8 +4,8 @@ Lightnovel.app chapter fetcher — CDP page navigation + font decode.
 Edge must be running with --remote-debugging-port=9222 and logged into lightnovel.app.
 
 Usage:
-  python lightnovel_fetch.py --bid 17028 --chapter 8
-  python lightnovel_fetch.py --bid 17028 --chapter 8 -o chapter.txt
+  python lightnovel_fetch.py --bid <BID> --chapter <CID>
+  python lightnovel_fetch.py --bid <BID> --chapter <CID> -o chapter.txt
 """
 
 import sys, io, json, time, re, base64, argparse

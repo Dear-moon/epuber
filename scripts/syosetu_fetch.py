@@ -5,7 +5,7 @@ Automatically launches Edge with remote debugging, bypasses Cloudflare, fetches 
 
 Usage:
   python syosetu_fetch.py                                    # auto-detect novel from browser
-  python syosetu_fetch.py -u https://syosetu.org/novel/68239/   # specify URL
+  python syosetu_fetch.py -u https://syosetu.org/novel/<ID>/   # specify URL
   python syosetu_fetch.py -u ... --start 1 --end 3              # fetch chapters 1-3 only
 """
 
@@ -476,7 +476,7 @@ def save_html_chapter(html_dir, ch_num, ch_title, honbun_html, images):
 def main():
     parser = argparse.ArgumentParser(
         description='Fetch syosetu.org novel (auto-launches Edge, bypasses Cloudflare)')
-    parser.add_argument('-u', '--url', help='syosetu.org novel URL (e.g. https://syosetu.org/novel/68239/)')
+    parser.add_argument('-u', '--url', help='syosetu.org novel URL (e.g. https://syosetu.org/novel/<ID>/)')
     parser.add_argument('-o', '--output', default='syosetu_fetched.txt', help='Output TXT file (TXT mode)')
     parser.add_argument('--html', help='Output per-chapter HTML files to this directory (HTML mode)')
     parser.add_argument('-d', '--delay', type=float, default=0.8, help='Delay between chapters')
@@ -499,7 +499,7 @@ def main():
             print(f"Found existing tab: {novel_url}")
         else:
             print("No URL specified and no existing syosetu tab found.")
-            print("Usage: python syosetu_fetch.py -u https://syosetu.org/novel/68239/")
+            print("Usage: python syosetu_fetch.py -u https://syosetu.org/novel/<ID>/")
             sys.exit(1)
 
     base_url = re.match(r'(https?://[^/]+/novel/\d+)', novel_url).group(1)

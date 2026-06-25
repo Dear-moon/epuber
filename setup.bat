@@ -66,7 +66,7 @@ echo   Setup complete!
 echo ============================================
 echo.
 echo Usage:
-echo   python ebook.py lightnovel --bid 17028 --all
+echo   python ebook.py lightnovel --bid BID --all
 echo   python ebook.py syosetu -u "https://syosetu.org/novel/XXXXX/"
 echo   python ebook.py wenku8 -u "https://www.wenku8.net/novel/X/XXX/index.htm"
 echo   python ebook.py pack "novel_dir" --author "Author Name"
