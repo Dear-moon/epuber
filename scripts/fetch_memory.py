@@ -4,6 +4,10 @@ Fetch memory — tracks which chapters of which novels have been fetched.
 Stored as JSON at ~/.claude/skills/txt-to-epub/fetch_memory.json
 
 Keys: f"{source}:{novel_id}" — e.g. "lightnovel:<BID>", "syosetu:<ID>"
+Record kinds (分开统计):
+  web   → "novelia:{source}:{novel_id}", chapter_count（web 版章节数）
+  wenku → "wenku:{wid}", volume_count（文库版卷数）
+  lightnovel 逐章 → chapters dict
 """
 
 import json, time
@@ -104,6 +108,20 @@ class FetchMemory:
 
 # ---- CLI ----
 
+def _count_of(entry):
+    """Return (count, unit_label) for a memory record of any shape.
+
+    - lightnovel 逐章记录: chapters dict → 章数
+    - novelia web 整书抓取: chapter_count → 章数
+    - wenku 文库版: volume_count → 卷数
+    """
+    if isinstance(entry.get("chapters"), dict):
+        return len(entry["chapters"]), "章"
+    if "volume_count" in entry:
+        return entry["volume_count"], "卷"
+    return entry.get("chapter_count", 0), "章"
+
+
 def cmd_memory(args):
     """Manage fetch memory."""
     mem = FetchMemory()
@@ -115,10 +133,11 @@ def cmd_memory(args):
             return
         for src, nid, entry in all_entries:
             title = entry.get("title", nid)
-            ch_count = len(entry.get("chapters", {}))
             last = entry.get("last_fetch", "?")
-            print(f"  {src}:{nid}  {title}")
-            print(f"    {ch_count} chapters, last: {last}")
+            count, unit = _count_of(entry)
+            tag = {"web": "[web] ", "wenku": "[文库] "}.get(entry.get("kind", ""), "")
+            print(f"  {tag}{src}:{nid}  {title}")
+            print(f"    {count} {unit}, last: {last}")
 
     elif args[0] == "forget" and len(args) >= 3:
         src, nid = args[1], args[2]
@@ -133,19 +152,25 @@ def cmd_memory(args):
         src, nid = args[1], args[2]
         entry = mem.get_novel(src, nid)
         if entry:
-            chs = sorted(entry.get("chapters", {}).keys(), key=int)
             print(f"{entry.get('title', nid)} ({src}:{nid})")
-            print(f"Fetched: {len(chs)} chapters")
-            if chs:
-                print(f"Range: {chs[0]} - {chs[-1]}")
-                # Show gaps
-                nums = sorted(int(c) for c in chs)
-                gaps = []
-                for i in range(1, len(nums)):
-                    if nums[i] != nums[i-1] + 1:
-                        gaps.append(f"{nums[i-1]+1}-{nums[i]-1}")
-                if gaps:
-                    print(f"Gaps: {', '.join(gaps[:10])}{'...' if len(gaps)>10 else ''}")
+            if "volume_count" in entry:
+                print(f"文库版卷数: {entry.get('volume_count', 0)}")
+            elif isinstance(entry.get("chapters"), dict):
+                chs = sorted(entry["chapters"].keys(), key=int)
+                print(f"Fetched: {len(chs)} chapters")
+                if chs:
+                    print(f"Range: {chs[0]} - {chs[-1]}")
+                    # Show gaps
+                    nums = sorted(int(c) for c in chs)
+                    gaps = []
+                    for i in range(1, len(nums)):
+                        if nums[i] != nums[i-1] + 1:
+                            gaps.append(f"{nums[i-1]+1}-{nums[i]-1}")
+                    if gaps:
+                        print(f"Gaps: {', '.join(gaps[:10])}{'...' if len(gaps)>10 else ''}")
+            else:
+                # web 版整体抓取: 记录章节总数
+                print(f"Web 版章节数: {entry.get('chapter_count', 0)}")
             print(f"Last fetch: {entry.get('last_fetch', '?')}")
         else:
             print(f"No memory for {src}:{nid}")

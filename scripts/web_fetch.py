@@ -46,6 +46,7 @@ def _mark_novel(source, novel_id, title, chapter_count):
         data[key] = {
             'title': title,
             'source': source,
+            'kind': 'web',
             'chapter_count': chapter_count,
             'first_fetch': data.get(key, {}).get('first_fetch', time.strftime('%Y-%m-%d %H:%M')),
             'last_fetch': time.strftime('%Y-%m-%d %H:%M'),
@@ -141,14 +142,15 @@ def fetch_metadata(source, novel_id, session):
     }
 
 
-def fetch_chapter(source, novel_id, chapter_id, translation, session):
+def fetch_chapter(source, novel_id, chapter_id, translation, session, bilingual=False):
     """Fetch a single chapter's content from novelia.cc API.
 
     Args:
-        translation: one of 'jp', 'youdao', 'gpt', 'sakura'
+        translation: one of 'jp', 'youdao', 'gpt', 'sakura' (ZH default: 'sakura')
+        bilingual: if True, return both JP + ZH paragraphs
 
     Returns:
-        dict with keys: title_jp, title_zh, paragraphs, next_id
+        dict with keys: title_jp, title_zh, paragraphs, (paragraphs_jp if bilingual), next_id
     """
     url = f'{NOVELIA_API}/novel/{source}/{novel_id}/chapter/{chapter_id}'
     resp = session.get(url, timeout=30)
@@ -159,23 +161,28 @@ def fetch_chapter(source, novel_id, chapter_id, translation, session):
     para_key = TRANSLATIONS.get(translation, TRANSLATIONS['sakura'])
     paragraphs = data.get(para_key, data.get('paragraphs', []))
 
-    return {
+    result = {
         'title_jp': data.get('titleJp', ''),
         'title_zh': data.get('titleZh', ''),
         'paragraphs': paragraphs,
         'next_id': data.get('nextId', ''),
     }
 
+    if bilingual:
+        result['paragraphs_jp'] = data.get('paragraphs', [])
+
+    return result
+
 
 # ============================================================
 #  Main fetcher
 # ============================================================
 
-def _fetch_one_chapter(source, novel_id, ch_id, translation, delay, ch_title_zh):
+def _fetch_one_chapter(source, novel_id, ch_id, translation, delay, ch_title_zh, bilingual=False):
     """Fetch a single chapter in its own session (thread-safe)."""
     session = create_session()
     try:
-        ch_data = fetch_chapter(source, novel_id, ch_id, translation, session)
+        ch_data = fetch_chapter(source, novel_id, ch_id, translation, session, bilingual=bilingual)
         return ch_data, None
     except Exception as e:
         return None, str(e)
@@ -184,7 +191,7 @@ def _fetch_one_chapter(source, novel_id, ch_id, translation, delay, ch_title_zh)
             time.sleep(delay)
 
 
-def _fetch_batch(chapter_items, source, novel_id, translation, delay, workers, label=""):
+def _fetch_batch(chapter_items, source, novel_id, translation, delay, workers, label="", bilingual=False):
     """Fetch a batch of chapters, returning {toc_index: (ch_data, error)}."""
     results = {}
     prefix = f"  [{label}] " if label else "  "
@@ -197,7 +204,7 @@ def _fetch_batch(chapter_items, source, novel_id, translation, delay, workers, l
                 ch_id = ch['chapterId']
                 ch_title = ch.get('titleZh', ch.get('titleJp', f'Chapter {ch_id}'))
                 f = executor.submit(_fetch_one_chapter, source, novel_id,
-                                   ch_id, translation, delay, ch_title)
+                                   ch_id, translation, delay, ch_title, bilingual)
                 futures[f] = (idx, ch_title)
 
             done = 0
@@ -212,7 +219,7 @@ def _fetch_batch(chapter_items, source, novel_id, translation, delay, workers, l
         for idx, ch in chapter_items:
             ch_id = ch['chapterId']
             ch_title = ch.get('titleZh', ch.get('titleJp', f'Chapter {ch_id}'))
-            ch_data, error = _fetch_one_chapter(source, novel_id, ch_id, translation, delay, ch_title)
+            ch_data, error = _fetch_one_chapter(source, novel_id, ch_id, translation, delay, ch_title, bilingual)
             results[idx] = (ch_data, error)
             status = 'OK' if not error else f'FAILED'
             print(f"  [{len(results)}/{len(chapter_items)}] {ch_title[:50]}... {status}", flush=True)
@@ -220,7 +227,7 @@ def _fetch_batch(chapter_items, source, novel_id, translation, delay, workers, l
     return results
 
 
-def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
+def fetch_novel(url, translation='sakura', delay=0.3, workers=5, bilingual=False):
     """Fetch complete novel from a supported web source.
 
     Args:
@@ -228,6 +235,7 @@ def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
         translation: which translation to fetch ('jp', 'youdao', 'gpt', 'sakura')
         delay: seconds to wait between requests per worker (be polite)
         workers: concurrent download threads (1 = sequential)
+        bilingual: if True, output JP+ZH interleaved paragraphs (forces JP fetch + ZH merge)
 
     Returns:
         (combined_text, metadata_dict)
@@ -270,7 +278,8 @@ def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
     if not toc:
         raise RuntimeError("No chapters found in table of contents")
     print(f"  Chapters: {len(toc)}")
-    print(f"  Translation: {translation} ({TRANSLATIONS[translation]})")
+    mode_label = 'bilingual JP+ZH' if bilingual else f'{translation} ({TRANSLATIONS[translation]})'
+    print(f"  Mode: {mode_label}")
 
     # Separate TOC items needing API calls from section headers
     chapter_items = []   # [(toc_index, ch)]
@@ -279,7 +288,8 @@ def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
             chapter_items.append((i, ch))
 
     # First pass: parallel fetch
-    results = _fetch_batch(chapter_items, source, novel_id, translation, delay, workers)
+    results = _fetch_batch(chapter_items, source, novel_id, translation, delay, workers,
+                          bilingual=bilingual)
 
     # Retry loop: retry failed chapters up to 3 times with increasing backoff
     retry_delays = [1.0, 2.0, 4.0]
@@ -292,7 +302,8 @@ def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
         print(f"\n  Retry round {retry_round}: {len(failed)} failed chapters "
               f"(delay={retry_delay}s, sequential)...", flush=True)
         retry_results = _fetch_batch(failed, source, novel_id, translation,
-                                     retry_delay, workers=1, label=f"retry{retry_round}")
+                                     retry_delay, workers=1, label=f"retry{retry_round}",
+                                     bilingual=bilingual)
         results.update(retry_results)
 
     # Final failure count
@@ -324,13 +335,34 @@ def fetch_novel(url, translation='sakura', delay=0.3, workers=5):
         if i in results:
             ch_data, error = results[i]
             if ch_data and not error:
-                parts.append(f'\n\n第{ch_count}章 {ch_title_zh}\n')
-                for para in ch_data['paragraphs']:
-                    para = para.strip()
-                    if para:
-                        parts.append(para)
-                    else:
+                # Bilingual chapter header: ZH title + JP title
+                if bilingual:
+                    ch_title_jp = ch_data.get('title_jp', '')
+                    header = f'\n\n第{ch_count}章 {ch_title_zh}'
+                    if ch_title_jp and ch_title_jp != ch_title_zh:
+                        header += f'  ({ch_title_jp})'
+                    parts.append(header + '\n')
+                else:
+                    parts.append(f'\n\n第{ch_count}章 {ch_title_zh}\n')
+
+                if bilingual:
+                    # Interleave JP + ZH paragraphs
+                    p_zh = ch_data['paragraphs']
+                    p_jp = ch_data.get('paragraphs_jp', [])
+                    max_len = max(len(p_zh), len(p_jp))
+                    for pi in range(max_len):
+                        if pi < len(p_jp) and p_jp[pi].strip():
+                            parts.append(f'JP: {p_jp[pi].strip()}')
+                        if pi < len(p_zh) and p_zh[pi].strip():
+                            parts.append(f'ZH: {p_zh[pi].strip()}')
                         parts.append('')
+                else:
+                    for para in ch_data['paragraphs']:
+                        para = para.strip()
+                        if para:
+                            parts.append(para)
+                        else:
+                            parts.append('')
             else:
                 parts.append(f'\n\n第{ch_count}章 {ch_title_zh}\n')
                 parts.append(f'[获取失败: {error}]')
@@ -365,11 +397,21 @@ Examples:
                         help='Delay between chapter requests in seconds (default: 0.3)')
     parser.add_argument('-w', '--workers', type=int, default=5,
                         help='Concurrent download threads (default: 5, 1 = sequential)')
+    parser.add_argument('--jp', action='store_true',
+                        help='Fetch original Japanese (shortcut for -t jp)')
+    parser.add_argument('-b', '--bilingual', action='store_true',
+                        help='Fetch JP+ZH bilingual (interleaved paragraphs)')
     args = parser.parse_args()
 
+    # Resolve mode: --bilingual > --jp > -t translation
+    translation = args.translation
+    bilingual = args.bilingual
+    if args.jp:
+        translation = 'jp'
+
     print(f"Fetching: {args.url}")
-    text, meta = fetch_novel(args.url, translation=args.translation,
-                            delay=args.delay, workers=args.workers)
+    text, meta = fetch_novel(args.url, translation=translation if not bilingual else 'sakura',
+                            delay=args.delay, workers=args.workers, bilingual=bilingual)
 
     # Record in fetch memory
     src, nid = parse_url(args.url)

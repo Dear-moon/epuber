@@ -31,6 +31,10 @@ python ebook.py syosetu -u "https://syosetu.org/novel/<ID>/" --html "dir"
 # 抓取 novelia.cc
 python ebook.py novelia "https://n.novelia.cc/novel/hameln/<ID>" -o novel.txt
 
+# 文库版（出版社正式 EPUB，每本书一目录）
+python ebook.py wenku "https://n.novelia.cc/wenku/<WID>" --list   # 先列卷
+python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"          # 下载全部卷
+
 # 抓取 wenku8.net
 python ebook.py wenku8 "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm" -o novel.txt
 
@@ -111,6 +115,22 @@ python scripts/convert.py novel.txt -o novel.epub --title "书名"
 ```
 
 翻译源: `-t sakura`(推荐) / `jp` / `youdao` / `gpt`
+
+### 2b. novelia 文库版下载（出版社正式 EPUB）
+
+`/wenku/<WID>` 是出版社正式发行的文库版（角川スニーカー文庫等），按卷分册，含序章/终章/后记/特典。API 无需登录。
+
+```bash
+python scripts/wenku_fetch.py "https://n.novelia.cc/wenku/<WID>" --list   # 列卷
+python scripts/wenku_fetch.py "https://n.novelia.cc/wenku/<WID>"          # 下载全部卷
+python scripts/wenku_fetch.py "https://n.novelia.cc/wenku/<WID>" --volume 2
+python scripts/wenku_fetch.py "https://n.novelia.cc/wenku/<WID>" --mode jp-zh
+```
+
+- 输出到 `{ebook根}/{书名}/` 目录（`第X卷_*.epub` + `book_info.json`）
+- 默认 `mode=zh`（只要中文）；`zh-jp`/`jp-zh` 含对照；纯日文 `jp` 不被支持
+- 翻译源 `sakura,gpt,youdao` 逗号分隔，priority 自动回退
+- 对应 web 版日后抓取会自动移入同目录（`{书名}_web版.epub`）
 
 ### 3. syosetu.org CDP 抓取（Cloudflare 穿透）
 
@@ -208,6 +228,7 @@ VLM OCR 字形对照表方案，输出完全无需字体的纯 Unicode EPUB。�
 |------|------|------|
 | `convert.py` | TXT → EPUB（编码检测+章节识别+排版） | 1 |
 | `web_fetch.py` | novelia.cc API 抓取 | 2 |
+| `wenku_fetch.py` | novelia 文库版下载（完整卷册 EPUB） | 2b |
 | `syosetu_fetch.py` | syosetu.org CDP 抓取（TXT / HTML+插图） | 3 |
 | `wenku8_fetch.py` | wenku8.net CDP 抓取 | 4 |
 | `lightnovel_decode.py` | lightnovel.app 字体解码（离线快照） | 5 |

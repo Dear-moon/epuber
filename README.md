@@ -102,6 +102,10 @@ python ebook.py wenku8 "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm"
 # novelia.cc
 python ebook.py novelia "https://n.novelia.cc/novel/<SOURCE>/<ID>" -o <OUTPUT>.txt
 
+# novelia bunko edition (published volumes, one dir per book)
+python ebook.py wenku "https://n.novelia.cc/wenku/<WID>" --list
+python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"
+
 # TXT → EPUB
 python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "Title" --author "Author"
 

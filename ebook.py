@@ -11,13 +11,14 @@ Usage:
   python ebook.py syosetu -u "https://syosetu.org/novel/<ID>/"       # 抓取
   python ebook.py syosetu -u "..." --html <OUT_DIR>                  # HTML 模式
   python ebook.py novelia "https://n.novelia.cc/novel/<SOURCE>/<ID>"
+  python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"            # 文库版卷册 EPUB
   python ebook.py wenku8 "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm"
   python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "书名"
   python ebook.py pack <BOOK_DIR> --author "作者"
   python ebook.py decode --snapshot page.html --font-url "https://..."
 """
 
-import sys, os, subprocess, json, re
+import sys, os, subprocess, json, re, time
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent / "scripts"
@@ -53,6 +54,98 @@ def _find_book_dir(bid):
             except Exception:
                 pass
     return None
+
+
+def _route_web_to_wenku(url, epub_path):
+    """If a web novel maps to a local wenku book dir, move its EPUB there as *web版*.
+
+    wenku book dirs carry book_info.json with type='wenku' and web_ids
+    (e.g. 'kakuyomu/16817330650648816745'). When the fetched web novel matches,
+    the web EPUB is placed in the same dir to keep web + bunko versions together.
+
+    Matching:
+      1) 本地扫描: book_info 的 web_ids 精确/跨源匹配
+      2) API 检测: web 小说元数据里的 wenkuId 命中本地 wenku 目录的 wid
+      （若文库版存在但尚未本地下载，给出提示，不强行路由）
+    """
+    try:
+        from web_fetch import parse_url, create_session, NOVELIA_API
+    except Exception:
+        return
+    try:
+        source, novel_id = parse_url(url)
+    except Exception:
+        return
+    web_key = f'{source}/{novel_id}'
+
+    fetch_dir = get_fetch_dir()
+    ebook_root = fetch_dir.parent if fetch_dir.name == 'fetch' else fetch_dir
+    src = Path(epub_path)
+    if not src.exists():
+        return
+
+    # 通过 API 检测该 web 小说是否有关联的文库版（wenkuId）
+    api_wid = None
+    try:
+        r = create_session().get(f'{NOVELIA_API}/novel/{source}/{novel_id}', timeout=15)
+        if r.status_code == 200:
+            api_wid = r.json().get('wenkuId')
+    except Exception:
+        api_wid = None
+
+    # syosetu/narou/hameln 互备源共享同一小说 id，允许跨源匹配
+    group = {'syosetu', 'narou', 'hameln'}
+
+    for d in ebook_root.iterdir():
+        if not d.is_dir():
+            continue
+        info_path = d / 'book_info.json'
+        if not info_path.exists():
+            continue
+        try:
+            info = json.loads(info_path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if info.get('type') != 'wenku':
+            continue
+
+        ids = info.get('web_ids', [])
+        matched = web_key in ids
+        if not matched and api_wid and info.get('wid') == api_wid:
+            matched = True
+        if not matched and novel_id:
+            for k in ids:
+                if '/' not in k:
+                    continue
+                ks, kid = k.split('/', 1)
+                if kid == novel_id and source in group and ks in group:
+                    matched = True
+                    break
+        if not matched:
+            continue
+
+        target = d / f'{src.stem}_web版.epub'
+        try:
+            os.replace(str(src), str(target))
+        except Exception as e:
+            print(f'WARNING: could not move web EPUB to wenku dir: {e}')
+            return
+        info['web_version'] = {
+            'source': source,
+            'novel_id': novel_id,
+            'file': target.name,
+            'fetched_at': time.strftime('%Y-%m-%d %H:%M'),
+        }
+        info_path.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding='utf-8')
+        print(f'Web version routed to wenku dir: {target}')
+        return
+
+    if api_wid:
+        print(f'Note: this web novel has a bunko edition (wenku {api_wid}). '
+              f'Run: python ebook.py wenku "https://n.novelia.cc/wenku/{api_wid}" '
+              f'to download it — later web fetches will land in the same folder.')
+    else:
+        print('(no local wenku dir for this web novel; EPUB kept at default location)')
 
 
 def _pack_book(book_dir, author=None, output=None):
@@ -188,6 +281,8 @@ def cmd_novelia(args):
     """novelia.cc API 抓取 → 自动转 EPUB + 清理临时 TXT"""
     force = '--force' in args
     no_epub = '--no-epub' in args
+    jp_mode = '--jp' in args
+    bilingual = '-b' in args or '--bilingual' in args
 
     # Extract -o, -t, -w, -d flags
     output_epub = None
@@ -206,7 +301,7 @@ def cmd_novelia(args):
             workers = args[i + 1]; i += 1
         elif a in ('-d', '--delay') and i + 1 < len(args):
             delay = args[i + 1]; i += 1
-        elif a in ('--force', '--no-epub'):
+        elif a in ('--force', '--no-epub', '--jp', '-b', '--bilingual'):
             pass
         else:
             clean.append(a)
@@ -229,6 +324,10 @@ def cmd_novelia(args):
         fetch_args += ['-w', workers]
     if delay:
         fetch_args += ['-d', delay]
+    if jp_mode:
+        fetch_args += ['--jp']
+    if bilingual:
+        fetch_args += ['--bilingual']
 
     print(f"Fetching: {url}")
     result = subprocess.run(
@@ -281,8 +380,15 @@ def cmd_novelia(args):
     if os.path.exists(epub_path):
         size_mb = os.path.getsize(epub_path) / (1024*1024)
         print(f"EPUB: {size_mb:.1f} MB → {epub_path}")
+        # 若该 web 小说对应某本地文库版目录，把 web 版挪进同一目录
+        _route_web_to_wenku(url, epub_path)
     else:
         print(f"ERROR: EPUB not created")
+
+
+def cmd_wenku(args):
+    """novelia 文库版下载 (每本书一目录，含卷册 EPUB)"""
+    _run('wenku_fetch.py', *args)
 
 
 def cmd_wenku8(args):
@@ -337,6 +443,7 @@ def print_help():
     print("                 --no-epub 跳过自动压制")
     print("  syosetu        syosetu.org CDP 抓取 (Cloudflare 穿透)")
     print("  novelia        novelia.cc API 抓取")
+    print("  wenku          novelia 文库版下载 (每本书一目录)")
     print("  wenku8         wenku8.net CDP 抓取")
     print("  convert        TXT → EPUB")
     print("  pack           HTML 目录 → 字体嵌入 EPUB")
@@ -361,6 +468,7 @@ COMMANDS = {
     'syosetu': cmd_syosetu,
     'novelia': cmd_novelia,
     'wenku8': cmd_wenku8,
+    'wenku': cmd_wenku,
     'convert': cmd_convert,
     'pack': cmd_pack,
     'decode': cmd_decode,
