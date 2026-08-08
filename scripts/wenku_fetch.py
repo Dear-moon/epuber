@@ -146,44 +146,52 @@ def fetch_metadata(wid, session):
 
 
 def _build_volumes(meta):
-    """Pair volume_list ↔ volumes_meta by title, sort by publish date.
+    """Pair volume_list ↔ volumes_meta by title/number, sort by publish date.
 
     volumeJp entries look like:
       {'volumeId': '<book title>.epub', 'total': 26, 'sakura': 26, ...}
     volumes_meta entries look like:
       {'asin': 'B0...', 'title': '<book title>', 'publishAt': 1701360000, ...}
 
-    volumeId[:-5] (strip '.epub') should exactly equal volumes_meta[].title.
-    Matching gives a publish date → sort volumes chronologically.
+    标题格式在不同卷间会变体（'世界最強07' vs '世界最強 7'、'小篇集'、'12-BOOK特典' 等），
+    匹配策略：
+      1) 精确全文（NFKC 归一化）匹配
+      2) 卷号匹配：标题中的数字若紧跟空白或结尾，视为卷号，按 (主标题, 卷号) 配对
+         （数字后紧贴非空白后缀的如 '12-BOOK...' 特典不算卷号 → 保持未配对）
+    配对成功的按 publishAt 排序；未配对的（特典等）追加在后。
     Returns list of dicts: {index, title, volume_id, publish_at, asin, counts}
     """
     def _norm(s):
         # NFKC 归一化（全角/半角、组合读音假名、空格变体），使不同来源的标题可配对
         return unicodedata.normalize('NFKC', s or '').strip().lower()
 
-    vol_by_title = {}
+    def _num_key(s):
+        """→ (主标题, 卷号|None)。数字后紧跟空白或结尾才算卷号。"""
+        s2 = _norm(s)
+        m = re.search(r'([0-9]+)(\s+|$)', s2)
+        if m:
+            return s2[:m.start(1)].rstrip(), int(m.group(1))
+        return s2, None
+
+    vol_by_exact = {}
+    vol_by_num = {}
     for v in meta['volume_list']:
         vid = v.get('volumeId', '')
         base = vid[:-5] if vid.endswith('.epub') else vid
-        vol_by_title.setdefault(_norm(base), v)
+        vol_by_exact.setdefault(_norm(base), v)
+        key = _num_key(base)
+        if key[1] is not None:
+            vol_by_num.setdefault(key, v)
 
     ordered = []
     used = set()
     # 有 publishAt 的卷，按出版时间升序
     for vm in sorted(meta['volumes_meta'], key=lambda x: x.get('publishAt', 0)):
-        title = vm.get('title', '').strip()
-        vol = vol_by_title.get(_norm(title))
+        title = (vm.get('title') or '').strip()
+        vol = vol_by_exact.get(_norm(title))
         if vol is None:
-            # 允许元数据标题被截断/带后缀：较短者 ≥8 字符且为较长者前缀
-            ntitle = _norm(title)
-            for nbase, v in vol_by_title.items():
-                if not ntitle:
-                    continue
-                short, long = sorted([nbase, ntitle], key=len)
-                if len(short) >= 8 and long.startswith(short):
-                    vol = v
-                    break
-        if vol is None:
+            vol = vol_by_num.get(_num_key(title))
+        if vol is None or id(vol) in used:
             continue
         used.add(id(vol))
         ordered.append({
@@ -194,7 +202,7 @@ def _build_volumes(meta):
             'counts': {k: vol.get(k) for k in TRANSLATIONS},
         })
 
-    # 未配对的卷（不在 volumes_meta 中）追加在后，保持 API 顺序
+    # 未配对的卷（特典/不在 volumes_meta 中）追加在后，保持 API 顺序
     for v in meta['volume_list']:
         if id(v) in used:
             continue
