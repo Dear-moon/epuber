@@ -119,12 +119,26 @@ def parse_wenku_url(url):
 
 
 def fetch_metadata(wid, session):
-    """Fetch wenku novel metadata."""
+    """Fetch wenku novel metadata (with retry for flaky connections)."""
     url = f'{NOVELIA_API}/wenku/{wid}'
-    resp = session.get(url, timeout=30)
-    if resp.status_code != 200:
-        raise RuntimeError(f"Wenku API returned {resp.status_code} for {url}")
-    data = resp.json()
+    data = None
+    for attempt in range(4):
+        try:
+            resp = session.get(url, timeout=30)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Wenku API returned {resp.status_code} for {url}")
+            data = resp.json()
+            if not isinstance(data, dict) or 'titleZh' not in data:
+                # 结构异常，重试一次
+                if attempt == 3:
+                    raise RuntimeError(f"Wenku metadata returned unexpected structure for {url}")
+                time.sleep(1.0)
+                continue
+            break
+        except requests.exceptions.ConnectionError:
+            if attempt == 3:
+                raise
+            time.sleep(1.5)
 
     return {
         'wid': wid,
@@ -162,17 +176,36 @@ def _build_volumes(meta):
     Returns list of dicts: {index, title, volume_id, publish_at, asin, counts}
     """
     def _norm(s):
-        # NFKC 归一化（全角/半角、组合读音假名、空格变体），使不同来源的标题可配对
-        return unicodedata.normalize('NFKC', s or '').strip().lower()
+        # NFKC 归一化（全角/半角、组合读音假名）+ 折叠各种空白/分隔符
+        s2 = unicodedata.normalize('NFKC', s or '').lower()
+        s2 = re.sub(r'\[[^\]]*\]', '', s2)                      # [作者] 前缀
+        s2 = re.sub(r'^[^一-龥ぁ-んァ-ヶa-z0-9]+', '', s2)      # 行首非内容前导
+        s2 = re.sub(r'[+　　　 /]+', ' ', s2)                     # 各种分隔符折叠
+        s2 = re.sub(r'[・・]', ' ', s2)
+        s2 = re.sub(r'\s+', ' ', s2).strip()
+        return s2
 
     def _num_key(s):
-        """→ (主标题, 卷号|None)。数字后紧跟空白或结尾才算卷号。"""
+        """→ (主标题, 卷号|None)。识别 '第N巻'、独立/结尾数字为卷号。
+
+        无卷号时主标题保留整串（供无卷号元数据匹配有卷号 volumeId 的兜底用）。
+        """
         s2 = _norm(s)
-        m = re.search(r'([0-9]+)(\s+|$)', s2)
+        m = re.search(r'第(\d+)巻', s2)      # "第08巻"
+        if m:
+            return s2.replace(f'第{m.group(1)}巻', '').strip(), int(m.group(1))
+        m = re.search(r'([0-9]+)(\s|$)', s2)  # 独立/结尾数字
         if m:
             return s2[:m.start(1)].rstrip(), int(m.group(1))
         return s2, None
 
+    def _series(s):
+        """去掉卷号后的全集系列名（如 'アサシンズプライド'、'Secret Garden'）。"""
+        base, num = _num_key(s)
+        # 若带数字系列名，数字后一般是副标题 → 主标题已由 _num_key 截好
+        return base
+
+    # 以 volumeJp（volume_list）为主序，逐卷从 volumes_meta 反查 publish_at/asin
     vol_by_exact = {}
     vol_by_num = {}
     for v in meta['volume_list']:
@@ -183,36 +216,63 @@ def _build_volumes(meta):
         if key[1] is not None:
             vol_by_num.setdefault(key, v)
 
-    ordered = []
-    used = set()
-    # 有 publishAt 的卷，按出版时间升序
-    for vm in sorted(meta['volumes_meta'], key=lambda x: x.get('publishAt', 0)):
+    # volumes_meta 索引：精确 → 数字 → 无卷号系列名
+    meta_by_exact = {}
+    meta_by_num = {}
+    meta_by_series = {}
+    for vm in meta['volumes_meta']:
         title = (vm.get('title') or '').strip()
-        vol = vol_by_exact.get(_norm(title))
-        if vol is None:
-            vol = vol_by_num.get(_num_key(title))
-        if vol is None or id(vol) in used:
-            continue
-        used.add(id(vol))
+        meta_by_exact.setdefault(_norm(title), vm)
+        key = _num_key(title)
+        if key[1] is not None:
+            meta_by_num.setdefault(key, vm)
+        else:
+            meta_by_series.setdefault(_series(title), vm)
+
+    ordered = []
+    used_meta = set()
+    for v in meta['volume_list']:
+        vid = v.get('volumeId', '')
+        base = vid[:-5] if vid.endswith('.epub') else vid
+        counts = {k: v.get(k) for k in TRANSLATIONS}
+
+        # 反查 volumes_meta
+        vm = None
+        nkey = _num_key(base)
+        if nkey[1] is not None:
+            vm = meta_by_num.get(nkey)
+        if vm is None:
+            vm = meta_by_exact.get(_norm(base))
+        if vm is None:
+            vm = meta_by_series.get(_series(base))   # volumeJp 无数字值兜底（如 'Secret Garden'）
+        if vm is None:
+            # 前缀兜底：volumeJp 的系列名是某条未占用 volumes_meta 标题的前缀
+            sbase = _series(base)
+            if len(sbase) >= 6:
+                for ttt, mvm in meta_by_exact.items():
+                    if ttt.startswith(sbase) and id(mvm) not in used_meta:
+                        vm = mvm
+                        break
+
+        publish_at = None
+        asin = None
+        title = base
+        if vm is not None and id(vm) not in used_meta:
+            used_meta.add(id(vm))
+            publish_at = vm.get('publishAt')
+            asin = vm.get('asin')
+            title = vm.get('title', base)
+
         ordered.append({
-            'title': title or vol.get('volumeId', ''),
-            'volume_id': vol['volumeId'],
-            'publish_at': vm.get('publishAt'),
-            'asin': vm.get('asin'),
-            'counts': {k: vol.get(k) for k in TRANSLATIONS},
+            'title': title,
+            'volume_id': vid,
+            'publish_at': publish_at,
+            'asin': asin,
+            'counts': counts,
         })
 
-    # 未配对的卷（特典/不在 volumes_meta 中）追加在后，保持 API 顺序
-    for v in meta['volume_list']:
-        if id(v) in used:
-            continue
-        ordered.append({
-            'title': v.get('volumeId', ''),
-            'volume_id': v['volumeId'],
-            'publish_at': None,
-            'asin': None,
-            'counts': {k: v.get(k) for k in TRANSLATIONS},
-        })
+    # 已按 publish_at 排序（无 publish_at 的卷不动，追加在后）
+    ordered.sort(key=lambda x: (x['publish_at'] is None, x['publish_at'] or 0))
 
     for i, vol in enumerate(ordered, 1):
         vol['index'] = i
@@ -452,6 +512,13 @@ Examples:
 
     _mark_wenku(wid, meta['title_zh'], len(volumes))
     print(f'\n  book_info.json saved. Total {len(volumes)} volume(s).')
+
+    # 时间轴抓取记录
+    try:
+        from fetch_history import record as _rec
+        _rec('wenku', meta['title_zh'], wid, len(volumes), 'volumes', str(out_dir), 'wenku')
+    except Exception:
+        pass
 
 
 if __name__ == '__main__':
