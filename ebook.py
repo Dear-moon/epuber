@@ -12,6 +12,9 @@ Usage:
   python ebook.py syosetu -u "..." --html <OUT_DIR>                  # HTML 模式
   python ebook.py novelia "https://n.novelia.cc/novel/<SOURCE>/<ID>"
   python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"            # 文库版卷册 EPUB
+  python ebook.py lk "https://www.lightnovel.fun/<LKID>"              # 轻之国度 (需 lk 账号)
+  python ebook.py esj "https://www.esjzone.one/forum/<BOARD>/<ESJID>/"# esjzone (CDP 渲染)
+  python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"  # 真白萌 (需 masiro 账号)
   python ebook.py wenku8 "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm"
   python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "书名"
   python ebook.py pack <BOOK_DIR> --author "作者"
@@ -82,7 +85,7 @@ def _route_web_to_wenku(url, epub_path):
     ebook_root = fetch_dir.parent if fetch_dir.name == 'fetch' else fetch_dir
     src = Path(epub_path)
     if not src.exists():
-        return
+        return str(src)
 
     # 通过 API 检测该 web 小说是否有关联的文库版（wenkuId）
     api_wid = None
@@ -129,7 +132,7 @@ def _route_web_to_wenku(url, epub_path):
             os.replace(str(src), str(target))
         except Exception as e:
             print(f'WARNING: could not move web EPUB to wenku dir: {e}')
-            return
+            return str(src)
         info['web_version'] = {
             'source': source,
             'novel_id': novel_id,
@@ -138,7 +141,7 @@ def _route_web_to_wenku(url, epub_path):
         }
         info_path.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding='utf-8')
         print(f'Web version routed to wenku dir: {target}')
-        return
+        return str(target)
 
     if api_wid:
         print(f'Note: this web novel has a bunko edition (wenku {api_wid}). '
@@ -146,6 +149,7 @@ def _route_web_to_wenku(url, epub_path):
               f'to download it — later web fetches will land in the same folder.')
     else:
         print('(no local wenku dir for this web novel; EPUB kept at default location)')
+    return str(src)
 
 
 def _pack_book(book_dir, author=None, output=None):
@@ -165,6 +169,28 @@ def _pack_book(book_dir, author=None, output=None):
     subprocess.run([sys.executable, str(SCRIPTS / 'html2epub_font.py')] + pack_args)
     print(f'EPUB saved: {output}')
     return output
+
+
+def _record_lightnovel(bid, book_dir, epub_path):
+    """记录 lightnovel 整书抓取事件到 fetch_records.json."""
+    book_name = ''
+    info_path = Path(book_dir) / 'book_info.json'
+    if info_path.exists():
+        try:
+            info = json.loads(info_path.read_text(encoding='utf-8'))
+            book_name = info.get('book_name', '')
+        except Exception:
+            pass
+    try:
+        chapter_count = len(list(Path(book_dir).glob('*.html')))
+    except Exception:
+        chapter_count = 0
+    try:
+        from fetch_history import record as _record
+        _record('lightnovel', book_name or f'bid {bid}', bid, chapter_count,
+                'chapters', epub_path, 'app')
+    except Exception:
+        pass
 
 
 def cmd_lightnovel(args):
@@ -203,7 +229,8 @@ def cmd_lightnovel(args):
         if not book_dir:
             print(f"ERROR: No fetched data found for bid={bid}"); sys.exit(1)
 
-        _pack_book(book_dir, author=author, output=output_epub)
+        out = _pack_book(book_dir, author=author, output=output_epub)
+        _record_lightnovel(bid, book_dir, out)
         return
 
     # --all: 抓取全部章节，默认生成 HTML 并自动压制 EPUB
@@ -254,7 +281,8 @@ def cmd_lightnovel(args):
             print(f"\n{'='*50}")
             book_dir = _find_book_dir(bid)
             if book_dir:
-                _pack_book(book_dir, author=author, output=output_epub)
+                out = _pack_book(book_dir, author=author, output=output_epub)
+                _record_lightnovel(bid, book_dir, out)
             else:
                 print(f"WARNING: Could not find book directory for bid={bid}, skip packing")
         return
@@ -340,13 +368,15 @@ def cmd_novelia(args):
         print("ERROR: TXT not generated"); sys.exit(1)
 
     # Parse metadata from web_fetch.py output for author/title
-    # We read the TXT header to get title and author
+    # We read the TXT header to get title and author (also count chapters for timeline record)
     with open(tmp_txt, 'r', encoding='utf-8') as f:
-        header = f.read(500)
+        txt_all = f.read()
+    header = txt_all[:500]
     title_match = re.search(r'^# (.+)', header, re.MULTILINE)
     author_match = re.search(r'作者: (.+)', header)
     title = title_match.group(1).strip() if title_match else 'Untitled'
     author = author_match.group(1).strip() if author_match else ''
+    chapter_count = len(re.findall(r'第\d+章', txt_all))
 
     if no_epub:
         # Just keep the TXT where user wants it
@@ -381,7 +411,16 @@ def cmd_novelia(args):
         size_mb = os.path.getsize(epub_path) / (1024*1024)
         print(f"EPUB: {size_mb:.1f} MB → {epub_path}")
         # 若该 web 小说对应某本地文库版目录，把 web 版挪进同一目录
-        _route_web_to_wenku(url, epub_path)
+        final_path = _route_web_to_wenku(url, epub_path) or epub_path
+        # 时间轴抓取记录
+        try:
+            from fetch_history import record as _record
+            from web_fetch import parse_url as _parse_url
+            _src, _nid = _parse_url(url)
+            _record('novelia', title, f'{_src}/{_nid}', chapter_count,
+                    'chapters', final_path, 'web')
+        except Exception:
+            pass
     else:
         print(f"ERROR: EPUB not created")
 
@@ -389,6 +428,21 @@ def cmd_novelia(args):
 def cmd_wenku(args):
     """novelia 文库版下载 (每本书一目录，含卷册 EPUB)"""
     _run('wenku_fetch.py', *args)
+
+
+def cmd_lk(args):
+    """轻之国度 (lightnovel.fun) 抓取 → 自动转 EPUB"""
+    _run('lk_fetch.py', *args)
+
+
+def cmd_esj(args):
+    """esjzone (www.esjzone.one) 抓取 → 自动转 EPUB"""
+    _run('esj_fetch.py', *args)
+
+
+def cmd_masiro(args):
+    """真白萌 (masiro.me) 抓取 → 自动转 EPUB"""
+    _run('masiro_fetch.py', *args)
 
 
 def cmd_wenku8(args):
@@ -444,6 +498,9 @@ def print_help():
     print("  syosetu        syosetu.org CDP 抓取 (Cloudflare 穿透)")
     print("  novelia        novelia.cc API 抓取")
     print("  wenku          novelia 文库版下载 (每本书一目录)")
+    print("  lk             轻之国度 (lightnovel.fun) 抓取, 需 lk 账号")
+    print("  esj            esjzone (www.esjzone.one) 抓取, CDP 渲染")
+    print("  masiro         真白萌 (masiro.me) 抓取, 需 masiro 账号")
     print("  wenku8         wenku8.net CDP 抓取")
     print("  convert        TXT → EPUB")
     print("  pack           HTML 目录 → 字体嵌入 EPUB")
@@ -469,6 +526,9 @@ COMMANDS = {
     'novelia': cmd_novelia,
     'wenku8': cmd_wenku8,
     'wenku': cmd_wenku,
+    'lk': cmd_lk,
+    'esj': cmd_esj,
+    'masiro': cmd_masiro,
     'convert': cmd_convert,
     'pack': cmd_pack,
     'decode': cmd_decode,

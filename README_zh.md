@@ -106,6 +106,15 @@ python ebook.py novelia "https://n.novelia.cc/novel/<SOURCE>/<ID>" -o <OUTPUT>.t
 python ebook.py wenku "https://n.novelia.cc/wenku/<WID>" --list
 python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"
 
+# 轻之国度（需在 config.json 配置 lk.username/password）
+python ebook.py lk "https://www.lightnovel.fun/<LKID>"
+
+# esjzone（需在 config.json 配置 esj.username/password；CDP 渲染）
+python ebook.py esj "https://www.esjzone.one/forum/<BOARD>/<ESJID>/"
+
+# 真白萌（需在 config.json 配置 masiro.username/password）
+python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"
+
 # TXT → EPUB
 python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "书名" --author "作者"
 

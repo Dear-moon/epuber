@@ -2,6 +2,20 @@
   "lightnovel": {
     "refresh_token": "YOUR_REFRESH_TOKEN_HERE"
   },
+  "lk": {
+    "username": "",
+    "password": ""
+  },
+  "esj": {
+    "username": "",
+    "password": "",
+    "cookie": ""
+  },
+  "masiro": {
+    "username": "",
+    "password": "",
+    "cookie": ""
+  },
   "fetch_dir": "./fetch",
   "edge_path": null
 }

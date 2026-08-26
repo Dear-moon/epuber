@@ -35,6 +35,18 @@ python ebook.py novelia "https://n.novelia.cc/novel/hameln/<ID>" -o novel.txt
 python ebook.py wenku "https://n.novelia.cc/wenku/<WID>" --list   # 先列卷
 python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"          # 下载全部卷
 
+# 轻之国度（需 config.json 配置 lk.username/password）
+python ebook.py lk "https://www.lightnovel.fun/<LKID>"
+
+# esjzone（需 config.json 配置 esj.username/password；CDP 渲染正文）
+python ebook.py esj "https://www.esjzone.one/forum/<BOARD>/<ESJID>/"
+
+# 真白萌（需 config.json 配置 masiro.username/password）
+python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"
+
+# 时间轴抓取记录（ebook 根目录 fetch_records.json）
+python scripts/fetch_history.py list
+
 # 抓取 wenku8.net
 python ebook.py wenku8 "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm" -o novel.txt
 
@@ -131,6 +143,19 @@ python scripts/wenku_fetch.py "https://n.novelia.cc/wenku/<WID>" --mode jp-zh
 - 默认 `mode=zh`（只要中文）；`zh-jp`/`jp-zh` 含对照；纯日文 `jp` 不被支持
 - 翻译源 `sakura,gpt,youdao` 逗号分隔，priority 自动回退
 - 对应 web 版日后抓取会自动移入同目录（`{书名}_web版.epub`）
+
+### 2c. 轻之国度 lk（lightnovel.fun）
+
+中文轻小说翻译社区，正文接口需登录。逆向自 lightnovel-pydownloader 的 app API。
+
+```bash
+python scripts/lk_fetch.py "https://www.lightnovel.fun/<LKID>"
+python scripts/lk_fetch.py --id <LKID> -o out.txt
+```
+
+- 需 `config.json` 配 `lk.username` / `lk.password`
+- 响应 base64+zlib JSON；正文 BBCode；付费章节跳过（不购买）
+- 依赖 `curl_cffi`（python requests 连该站 SSL 报错）
 
 ### 3. syosetu.org CDP 抓取（Cloudflare 穿透）
 
@@ -229,6 +254,10 @@ VLM OCR 字形对照表方案，输出完全无需字体的纯 Unicode EPUB。�
 | `convert.py` | TXT → EPUB（编码检测+章节识别+排版） | 1 |
 | `web_fetch.py` | novelia.cc API 抓取 | 2 |
 | `wenku_fetch.py` | novelia 文库版下载（完整卷册 EPUB） | 2b |
+| `lk_fetch.py` | 轻之国度（lightnovel.fun）抓取 | 2c |
+| `fetch_history.py` | 时间轴抓取记录（fetch_records.json） | — |
+| `esj_fetch.py` | esjzone 抓取（CDP 渲染，需登录） | 9 |
+| `masiro_fetch.py` | 真白萌抓取（CDP 穿盾 + 登录） | 10 |
 | `syosetu_fetch.py` | syosetu.org CDP 抓取（TXT / HTML+插图） | 3 |
 | `wenku8_fetch.py` | wenku8.net CDP 抓取 | 4 |
 | `lightnovel_decode.py` | lightnovel.app 字体解码（离线快照） | 5 |
