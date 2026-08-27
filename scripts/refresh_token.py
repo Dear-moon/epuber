@@ -99,39 +99,47 @@ def _has_lightnovel_indexeddb(profile_dir):
 
 
 def _list_profiles(user_data_root):
-    """列出 User Data 下所有 profile 目录。"""
+    """列出 User Data 下所有 profile 名（相对名）。"""
     if not user_data_root.is_dir():
         return []
-    profs = []
+    names = []
     for d in user_data_root.iterdir():
         if d.is_dir() and (d.name == 'Default' or d.name.startswith('Profile') or d.name.startswith('Person')):
-            profs.append(d)
-    # Default 优先
-    profs.sort(key=lambda p: (p.name != 'Default', p.name))
-    return profs
+            names.append(d.name)
+    names.sort(key=lambda n: (n != 'Default', n))
+    return names
 
 
 def detect_profile(browser_pref=None, explicit_path=None):
     """探测含 lightnovel.app IndexedDB 的浏览器 profile。
 
-    Returns (browser, profile_path) or raises RuntimeError.
+    Returns (browser, user_data_root: Path, profile_name: str) or raises RuntimeError.
+
+    注意：--user-data-dir 必须指向 User Data 根，profile 用 --profile-directory 指定，
+    否则 Chromium 会把根子目录当新 user data，读到空 profile。
     """
     if explicit_path:
+        # 显式路径可能给到根或给到 profile 子目录；统一解析
         p = Path(explicit_path)
-        if p.is_dir() and _has_lightnovel_indexeddb(p):
-            return ('explicit', p)
-        if p.is_dir():
-            raise RuntimeError(f'profile {p} 下未找到 lightnovel.app 的数据')
-        raise RuntimeError(f'profile 路径不存在: {p}')
+        # 若 p 直接是含 IndexedDB 的 profile（其下 IndexedDB 有 lightnovel）
+        if _has_lightnovel_indexeddb(p):
+            return ('explicit', p.parent, p.name)
+        # 若 p 是 User Data 根，找其下含 lightnovel 的 profile 子目录
+        for name in _list_profiles(p):
+            prof_dir = p / name
+            if _has_lightnovel_indexeddb(prof_dir):
+                return ('explicit', p, name)
+        raise RuntimeError(f'profile {p} 下未找到 lightnovel.app 的数据')
 
     roots = _profile_roots()
     order = ['edge', 'chrome'] if not browser_pref else [browser_pref]
     for br in order:
-        if br not in roots:
+        if br not in roots or not roots[br].is_dir():
             continue
-        for prof in _list_profiles(roots[br]):
-            if _has_lightnovel_indexeddb(prof):
-                return (br, prof)
+        for name in _list_profiles(roots[br]):
+            prof_dir = roots[br] / name
+            if _has_lightnovel_indexeddb(prof_dir):
+                return (br, roots[br], name)
     raise RuntimeError(
         '未找到含 lightnovel.app IndexedDB 的浏览器 profile。\n'
         '请先用该浏览器登录 https://www.lightnovel.app/，再运行本脚本。\n'
@@ -141,33 +149,33 @@ def detect_profile(browser_pref=None, explicit_path=None):
 # ---- CDP 读 IndexedDB ----
 
 def _read_indexeddb_token(ws):
-    """在 lightnovel.app 页面上下文读 IndexedDB RefreshToken。"""
+    """在 lightnovel.app 页面上下文读 IndexedDB RefreshToken。
+
+    USER_AUTHENTICATION store 存的是纯字符串记录（值即 token 字符串本身），
+    非带 key 的对象。用 getAll 取所有记录取字符串。CDP awaitPromise 无法正确
+    await 外层 return-new-Promise 里再 JSON.stringify 的嵌套形态，故让内层
+    Promise 直接 resolve 数组、外层 await 后返回字符串，可稳定被 await。
+    """
     js = f"""
     (async () => {{
-        return await new Promise((resolve) => {{
-            try {{
-                let req = indexedDB.open('{DB_NAME}');
-                req.onerror = () => resolve(JSON.stringify({{ok:false, err:'open:'+req.error?.message}}));
-                req.onsuccess = () => {{
-                    let db = req.result;
-                    try {{
-                        let tx = db.transaction('{STORE_NAME}', 'readonly');
-                        let store = tx.objectStore('{STORE_NAME}');
-                        let g = store.get('{KEY}');
-                        g.onsuccess = () => {{
-                            let v = g.result === undefined ? null : g.result;
-                            if (v === null) resolve(JSON.stringify({{ok:false, err:'empty'}}));
-                            else resolve(JSON.stringify({{ok:true, value:v}}));
-                        }};
-                        g.onerror = () => resolve(JSON.stringify({{ok:false, err:'get:'+g.error?.message}}));
-                    }} catch(e) {{
-                        resolve(JSON.stringify({{ok:false, err:String(e)}}));
-                    }}
-                }};
-            }} catch(e) {{
-                resolve(JSON.stringify({{ok:false, err:String(e)}}));
-            }}
-        }}));
+        let db = await new Promise((r) => {{
+            let q = indexedDB.open('{DB_NAME}');
+            q.onsuccess = () => r(q.result);
+            q.onerror = () => r(null);
+        }});
+        if (!db) return JSON.stringify({{ok:false, err:'open'}});
+        let vals = [];
+        try {{
+            let tx = db.transaction('{STORE_NAME}', 'readonly');
+            let store = tx.objectStore('{STORE_NAME}');
+            let g = store.getAll();
+            vals = await new Promise((r) => {{ g.onsuccess = () => r(g.result || []); g.onerror = () => r([]); }});
+        }} catch (e) {{
+            return JSON.stringify({{ok:false, err:String(e)}});
+        }}
+        vals = vals.filter(v => typeof v === 'string' && v);
+        if (vals.length === 0) return JSON.stringify({{ok:false, err:'empty'}});
+        return JSON.stringify({{ok:true, value: vals[0]}});
     }})()
     """
     raw = cdp_eval(ws, js, timeout=15, await_promise=True)
@@ -232,18 +240,20 @@ def main():
     args = parser.parse_args()
 
     print('探测浏览器 profile...')
-    browser, profile = detect_profile(args.browser, args.profile)
-    print(f'  命中: {browser} profile = {profile}')
+    browser, user_data_root, profile_name = detect_profile(args.browser, args.profile)
+    print(f'  命中: {browser} profile = {user_data_root}\\{profile_name}')
 
-    exe = _exe_for(browser, profile, args.port)
+    exe = _exe_for(browser, user_data_root, args.port)
     url = 'https://www.lightnovel.app/'
     proc = None
     ws = None
     try:
         # 启动浏览器（复用 profile，本次实例）。关脚本时只关本进程，不 kill 用户浏览器。
+        # --user-data-dir 指向 User Data 根，profile 用 --profile-directory 指定。
         args_launch = [
             exe,
-            f'--user-data-dir={profile}',
+            f'--user-data-dir={user_data_root}',
+            f'--profile-directory={profile_name}',
             f'--remote-debugging-port={args.port}',
             '--remote-allow-origins=*',
             '--new-window',
@@ -283,10 +293,21 @@ def main():
                 '请先关闭已打开的浏览器再运行。')
 
         ws = ws_connect(ws_url)
-        time.sleep(2)  # 等 SPA 初始化
+        time.sleep(2)  # 等 SPA 浅初始化
 
         print('读取 IndexedDB RefreshToken...')
-        token = _read_indexeddb_token(ws)
+        # SPA 可能异步写入 token，轮询等待 store 出现字符串（最多 ~40s）
+        token = None
+        last_err = None
+        for attempt in range(20):
+            try:
+                token = _read_indexeddb_token(ws)
+                break
+            except RuntimeError as e:
+                last_err = e
+                time.sleep(2)
+        if token is None:
+            raise last_err
 
         if args.print:
             print(f'\nRefreshToken 读取成功（长度 {len(token)}，未写入 config.json）')
