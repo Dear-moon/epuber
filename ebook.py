@@ -14,6 +14,7 @@ Usage:
   python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"            # 文库版卷册 EPUB
   python ebook.py lk "https://www.lightnovel.fun/<LKID>"              # 轻之国度 (需 lk 账号)
   python ebook.py esj "https://www.esjzone.one/forum/<BOARD>/<ESJID>/"# esjzone (CDP 渲染)
+  python ebook.py refresh-token                                # 自动获取轻国 RefreshToken
   python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"  # 真白萌 (需 masiro 账号)
   python ebook.py wenku8 "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm"
   python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "书名"
@@ -440,6 +441,11 @@ def cmd_esj(args):
     _run('esj_fetch.py', *args)
 
 
+def cmd_refresh_token(args):
+    """自动获取 lightnovel.app RefreshToken (从浏览器 IndexedDB)"""
+    _run('refresh_token.py', *args)
+
+
 def cmd_masiro(args):
     """真白萌 (masiro.me) 抓取 → 自动转 EPUB"""
     _run('masiro_fetch.py', *args)
@@ -501,6 +507,7 @@ def print_help():
     print("  lk             轻之国度 (lightnovel.fun) 抓取, 需 lk 账号")
     print("  esj            esjzone (www.esjzone.one) 抓取, CDP 渲染")
     print("  masiro         真白萌 (masiro.me) 抓取, 需 masiro 账号")
+    print("  refresh-token  自动获取 lightnovel.app RefreshToken (浏览器 IndexedDB)")
     print("  wenku8         wenku8.net CDP 抓取")
     print("  convert        TXT → EPUB")
     print("  pack           HTML 目录 → 字体嵌入 EPUB")
@@ -529,6 +536,7 @@ COMMANDS = {
     'lk': cmd_lk,
     'esj': cmd_esj,
     'masiro': cmd_masiro,
+    'refresh-token': cmd_refresh_token,
     'convert': cmd_convert,
     'pack': cmd_pack,
     'decode': cmd_decode,

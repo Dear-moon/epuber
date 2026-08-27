@@ -44,6 +44,9 @@ python ebook.py esj "https://www.esjzone.one/forum/<BOARD>/<ESJID>/"
 # 真白萌（需 config.json 配置 masiro.username/password）
 python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"
 
+# 自动获取 lightnovel.app RefreshToken（浏览器 IndexedDB → config.json）
+python ebook.py refresh-token
+
 # 时间轴抓取记录（ebook 根目录 fetch_records.json）
 python scripts/fetch_history.py list
 
@@ -258,6 +261,7 @@ VLM OCR 字形对照表方案，输出完全无需字体的纯 Unicode EPUB。�
 | `fetch_history.py` | 时间轴抓取记录（fetch_records.json） | — |
 | `esj_fetch.py` | esjzone 抓取（CDP 渲染，需登录） | 9 |
 | `masiro_fetch.py` | 真白萌抓取（CDP 穿盾 + 登录） | 10 |
+| `refresh_token.py` | 自动获取 lightnovel.app RefreshToken | 8b |
 | `syosetu_fetch.py` | syosetu.org CDP 抓取（TXT / HTML+插图） | 3 |
 | `wenku8_fetch.py` | wenku8.net CDP 抓取 | 4 |
 | `lightnovel_decode.py` | lightnovel.app 字体解码（离线快照） | 5 |

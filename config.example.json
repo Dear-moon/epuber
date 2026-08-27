@@ -1,6 +1,7 @@
 {
   "lightnovel": {
-    "refresh_token": "YOUR_REFRESH_TOKEN_HERE"
+    "refresh_token": "YOUR_REFRESH_TOKEN_HERE",
+    "browser_profile": ""
   },
   "lk": {
     "username": "",

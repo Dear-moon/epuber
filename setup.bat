@@ -72,6 +72,7 @@ echo   python ebook.py wenku "https://n.novelia.cc/wenku/WID" --list
 echo   python ebook.py lk "https://www.lightnovel.fun/LKID"
 echo   python ebook.py esj "https://www.esjzone.one/forum/BOARD/ESJID/"
 echo   python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=MSID"
+echo   python ebook.py refresh-token
 echo   python ebook.py wenku8 -u "https://www.wenku8.net/novel/X/XXX/index.htm"
 echo   python ebook.py pack "novel_dir" --author "Author Name"
 echo   python ebook.py convert "novel.txt" -o "novel.epub" --title "Title"

@@ -112,6 +112,9 @@ python ebook.py lk "https://www.lightnovel.fun/<LKID>"
 # esjzone（需在 config.json 配置 esj.username/password；CDP 渲染）
 python ebook.py esj "https://www.esjzone.one/forum/<BOARD>/<ESJID>/"
 
+# 自动获取 lightnovel.app RefreshToken（从浏览器 IndexedDB）
+python ebook.py refresh-token
+
 # 真白萌（需在 config.json 配置 masiro.username/password）
 python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"
 

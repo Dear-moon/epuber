@@ -112,6 +112,9 @@ python ebook.py lk "https://www.lightnovel.fun/<LKID>"
 # esjzone (requires esj.username/password in config.json; CDP-rendered)
 python ebook.py esj "https://www.esjzone.one/forum/<BOARD>/<ESJID>/"
 
+# Auto-fetch lightnovel.app RefreshToken from browser IndexedDB
+python ebook.py refresh-token
+
 # masiro.me (真白萌) — requires masiro.username/password in config.json
 python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"
 
