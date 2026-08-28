@@ -24,9 +24,8 @@
 # 2. 一键安装依赖
 setup.bat
 
-# 3. 编辑 config.json，填入 lightnovel.app refresh_token（可选，仅 lightnovel 源需要）
-#    浏览器打开 lightnovel.app → F12 → Application → Local Storage
-#    Key: sb-yywiuxedvyfxdpznoyqy-auth-token
+# 3. 编辑 config.json，填入 lightnovel.app refresh_token（仅 lightnovel 源需要）
+#    自动获取: python ebook.py refresh-token  （读浏览器 IndexedDB）
 
 # 4. 开始使用
 python ebook.py lightnovel --bid <BID> --all                       # 抓取 + 自动压制 EPUB
@@ -217,6 +216,27 @@ requests  websocket-client  fonttools  brotli  curl_cffi  Pillow
 - **记忆数据**：抓取记忆存储在 `fetch_memory.json` 中，属个人数据，不包含在发行包内。
 - **实验性 OCR**：VLM OCR 字体解码方案（`build_decode_map.py`、`html2txt.py`）作为草案保留，对相似字形（未/末、己/已等）存在偶发误判。
 - **跨平台**：纯 Python，除默认解释器外无需其它语言运行时。
+
+## GitHub Actions 远程下载
+
+`\.github\workflows\download.yml` 可在 GitHub 云端 runner 上抓取并产出 EPUB，无需本地机器。
+
+**用法：** 仓库 → **Actions** → 选 **txt-to-epub download** → **Run workflow** → 填：
+
+| 输入 | 说明 |
+|---|---|
+| `source` | `lightnovel` / `wenku` / `novelia` / `lk` |
+| `book_id` | lightnovel=数字 bid；wenku=文库版 URL 或 WID；novelia=web URL；lk=URL 或书号 |
+| `mode` | lightnovel：`all`(全书逐章,免金币) / `download`(直接成品 EPUB,需金币) / `chapter`(单章) |
+| `chapter` | `mode=chapter` 时的 SortNum |
+| `convert` | lightnovel 服务端简繁 `t2s` / `s2t` / 留空 |
+| `translation` | novelia 翻译源 `sakura`/`jp`/`youdao`/`gpt` |
+
+**Secrets（仓库 → Settings → Secrets and variables → Actions）：**
+- `LIGHTNOVEL_REFRESH_TOKEN` — lightnovel 源必填（可 `python ebook.py refresh-token` 本地拿）
+- `LK_USERNAME` / `LK_PASSWORD` — 仅 lk 源需要
+
+**产物：** run 结束后下载 `txt-to-epub-output` artifact（`output.tar.gz`，含 `download/` 下批量生成的 `.epub`）。`FETCH_DIR=download` 时 EPUB 直接落在该目录下。
 
 ## 许可证
 

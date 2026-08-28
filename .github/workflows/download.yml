@@ -1,0 +1,122 @@
+name: txt-to-epub download
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        type: choice
+        description: '抓取源'
+        options:
+          - lightnovel
+          - wenku
+          - novelia
+          - lk
+        default: lightnovel
+        required: true
+      book_id:
+        type: string
+        description: 'lightnovel=数字bid / wenku=文库版URL或WID / novelia=webURL / lk=URL或书号'
+        required: true
+      mode:
+        type: choice
+        description: 'lightnovel: all=全书逐章(免金币) / download=直接下载成品EPUB(需金币权限) / chapter=单章'
+        options:
+          - all
+          - download
+          - chapter
+        default: all
+        required: false
+      chapter:
+        type: string
+        description: 'mode=chapter 时的 SortNum'
+        default: ''
+        required: false
+      convert:
+        type: string
+        description: 'lightnovel 服务端简繁转换: t2s / s2t / 留空(不转)'
+        default: ''
+        required: false
+      # 可选: novelia 翻译源 / w 并发
+      translation:
+        type: string
+        description: 'novelia 翻译源: sakura / jp / youdao / gpt (仅 novelia 用)'
+        default: 'sakura'
+        required: false
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    env:
+      # FETCH_DIR 覆盖 config.json 里的 Windows 路径；名 != 'fetch' => EPUB 落在 $FETCH_DIR 下
+      FETCH_DIR: download
+      # 从 GitHub Secrets 注入 (仓库 Settings -> Secrets and variables -> Actions)
+      LIGHTNOVEL_REFRESH_TOKEN: ${{ secrets.LIGHTNOVEL_REFRESH_TOKEN }}
+      LK_USERNAME: ${{ secrets.LK_USERNAME }}
+      LK_PASSWORD: ${{ secrets.LK_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run downloader
+        env:
+          SOURCE: ${{ inputs.source }}
+          BOOK_ID: ${{ inputs.book_id }}
+          MODE: ${{ inputs.mode }}
+          CHAPTER: ${{ inputs.chapter }}
+          CONVERT: ${{ inputs.convert }}
+          TRANSLATION: ${{ inputs.translation }}
+        run: |
+          set -e
+          mkdir -p "$FETCH_DIR"
+          case "$SOURCE" in
+            lightnovel)
+              args=(--bid "$BOOK_ID")
+              case "$MODE" in
+                all) args+=(--all) ;;
+                download) args+=(--download) ;;
+                chapter)
+                  if [ -z "$CHAPTER" ]; then
+                    echo "::error::mode=chapter 需要提供 chapter 号"
+                    exit 1
+                  fi
+                  args+=(--chapter "$CHAPTER")
+                  ;;
+              esac
+              if [ -n "$CONVERT" ]; then args+=(--convert "$CONVERT"); fi
+              python ebook.py lightnovel "${args[@]}"
+              ;;
+            wenku)
+              python ebook.py wenku "$BOOK_ID"
+              ;;
+            novelia)
+              python ebook.py novelia "$BOOK_ID" -t "$TRANSLATION"
+              ;;
+            lk)
+              python ebook.py lk "$BOOK_ID"
+              ;;
+          esac
+
+      - name: Pack results
+        run: |
+          set -e
+          if [ -d "$FETCH_DIR" ] && [ "$(find "$FETCH_DIR" -type f | wc -l)" -gt 0 ]; then
+            tar -czf output.tar.gz "$FETCH_DIR"
+            echo "packed $(find "$FETCH_DIR" -name '*.epub' | wc -l) epub file(s)"
+          else
+            echo "::warning::没有生成任何输出"
+            touch output.tar.gz
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: txt-to-epub-output
+          path: output.tar.gz
+          if-no-files-found: warn
+          retention-days: 90

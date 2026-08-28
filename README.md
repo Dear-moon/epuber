@@ -24,9 +24,8 @@ Fetch from lightnovel.app, syosetu.org, wenku8.net, novelia.cc and output font-e
 # 2. One-click dependency install
 setup.bat
 
-# 3. Edit config.json, add your lightnovel.app refresh_token (optional; lightnovel source only)
-#    Open lightnovel.app in browser → F12 → Application → Local Storage
-#    Key: sb-yywiuxedvyfxdpznoyqy-auth-token
+# 3. Edit config.json, add your lightnovel.app refresh_token (lightnovel source only)
+#    Fetch it automatically: python ebook.py refresh-token  (reads browser IndexedDB)
 
 # 4. Start using
 python ebook.py lightnovel --bid <BID> --all                       # fetch + auto-pack EPUB
@@ -217,6 +216,27 @@ No Dart SDK needed — the LightNovelShelf client is pure Python.
 - **Memory durability**: Fetch memory is stored in `fetch_memory.json`. This file is personal and excluded from distribution.
 - **Experimental OCR**: The VLM OCR font decoding path (`build_decode_map.py`, `html2txt.py`) is retained as a draft. It works but has accuracy issues with visually similar characters.
 - **Cross-platform**: Fully Python; no language runtime beyond the stock interpreter.
+
+## GitHub Actions remote download
+
+`.github/workflows/download.yml` fetches books on a GitHub cloud runner and produces EPUBs — no local machine needed.
+
+**Usage:** repo → **Actions** → **txt-to-epub download** → **Run workflow** → fill:
+
+| Input | Description |
+|---|---|
+| `source` | `lightnovel` / `wenku` / `novelia` / `lk` |
+| `book_id` | lightnovel=number bid; wenku=bunko URL or WID; novelia=web URL; lk=URL or id |
+| `mode` | lightnovel: `all` (per-chapter, no coins) / `download` (ready EPUB, needs coins) / `chapter` |
+| `chapter` | SortNum when `mode=chapter` |
+| `convert` | lightnovel server-side `t2s` / `s2t` / empty |
+| `translation` | novelia source `sakura`/`jp`/`youdao`/`gpt` |
+
+**Secrets (repo → Settings → Secrets and variables → Actions):**
+- `LIGHTNOVEL_REFRESH_TOKEN` — required for lightnovel (get locally via `python ebook.py refresh-token`)
+- `LK_USERNAME` / `LK_PASSWORD` — only for lk
+
+**Artifact:** download `txt-to-epub-output` (`output.tar.gz`) after the run; with `FETCH_DIR=download` the generated `.epub` files land inside it.
 
 ## License
 
