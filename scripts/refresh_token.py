@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 """
-lightnovel.app Refresh Token 自动获取。
+lightnovel.app Refresh Token 自动获取（优先无浏览器磁盘读）。
 
-工具：登录 lightnovel.app 后，复用已登录浏览器 profile，用 Edge/Chrome CDP 读取
-IndexedDB 里的 RefreshToken（数据库 LightNovelShelf / 存储 USER_AUTHENTICATION /
-key 'RefreshToken'），自动写回 config.json 的 lightnovel.refresh_token。
+登录 lightnovel.app 后，token 作为裸字符串存在 profile 的 IndexedDB leveldb
+（LightNovelShelf / USER_AUTHENTICATION / 'RefreshToken'）里。
 
-覆盖手动从 localStorage/DevTools 抠 token 的流程。
+主路径**不开浏览器**：直接解析磁盘 leveldb `.log`（WriteBatch 记录，key 含
+UTF-16LE "RefreshToken"）抠出 token，profile 被占用也能读。
+回退路径：复用已登录 profile，用 Edge/Chrome CDP 读 IndexedDB（此路径需先关闭
+该浏览器，复用 profile 无法双开）。
 
 用法:
-  python refresh_token.py                # 自动探测 profile → 读 token → 写回 config.json
+  python refresh_token.py                # 磁盘读 → 写回 config.json
   python refresh_token.py --print        # 只打印不写
   python refresh_token.py --profile <路径>   # 显式指定浏览器 profile
   python refresh_token.py --browser chrome  # 强制 Chrome（默认自动探测）
-需要浏览器已登录 lightnovel.app，且运行前请关闭该浏览器（复用 profile 无法双开）。
 """
 
 import os
 import sys
 import io
 import json
+import re
 import time
 import argparse
 import subprocess
@@ -146,6 +148,40 @@ def detect_profile(browser_pref=None, explicit_path=None):
         '或用 --profile <路径> 显式指定。')
 
 
+# ---- 磁盘读 IndexedDB（无浏览器）----
+
+_ALNUM32 = re.compile(rb"[A-Za-z0-9]{32}")
+_HEX32 = re.compile(rb"[0-9a-f]{32}")
+
+
+def _read_token_from_disk(profile_dir):
+    """Read RefreshToken straight from the profile's lightnovel IndexedDB leveldb.
+
+    The token lives as a bare ASCII string in the leveldb log. Parsing the
+    WriteBatch records is unreliable (Chromium compacts/recycles the .log, and the
+    token can then sit outside a kFull record), so we scan the raw bytes instead.
+
+    Discriminator: the refresh token is a 32-char alnum string that is NOT pure
+    lowercase hex — the other 32-char values in this store are MD5 cache keys
+    (pure `[0-9a-f]{32}`). No browser needed; returns the token or None.
+    """
+    idb_root = Path(profile_dir) / "IndexedDB"
+    if not idb_root.is_dir():
+        return None
+    for leveldb_dir in idb_root.glob("*lightnovel*.indexeddb.leveldb"):
+        for log_file in sorted(leveldb_dir.glob("*.log")):
+            try:
+                data = log_file.read_bytes()
+            except Exception:
+                continue
+            for m in _ALNUM32.finditer(data):
+                cand = m.group()
+                if _HEX32.fullmatch(cand):
+                    continue  # MD5 cache key, not the refresh token
+                return cand.decode()
+    return None
+
+
 # ---- CDP 读 IndexedDB ----
 
 def _read_indexeddb_token(ws):
@@ -227,8 +263,9 @@ def main():
         description='自动获取 lightnovel.app RefreshToken（从浏览器 IndexedDB）',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
-需要先登录 https://www.lightnovel.app/（用 Edge 或 Chrome），运行前请关闭该浏览器。
-  python refresh_token.py            # 自动探测 profile，读 token 写回 config.json
+需要先登录 https://www.lightnovel.app/（用 Edge 或 Chrome）。
+默认无浏览器直读磁盘 leveldb；读不到才回退 CDP（CDP 路径需先关闭该浏览器）。
+  python refresh_token.py            # 磁盘读 → 写回 config.json
   python refresh_token.py --print    # 只打印 token 不写 config
   python refresh_token.py --profile <路径>
   python refresh_token.py --browser edge|chrome
@@ -242,6 +279,21 @@ def main():
     print('探测浏览器 profile...')
     browser, user_data_root, profile_name = detect_profile(args.browser, args.profile)
     print(f'  命中: {browser} profile = {user_data_root}\\{profile_name}')
+
+    # 先试无浏览器直接读磁盘 leveldb（profile 被占用也能读）
+    disk_token = _read_token_from_disk(user_data_root / profile_name)
+    if disk_token:
+        if args.print:
+            print(f'\nRefreshToken（磁盘读取，未开浏览器）长度 {len(disk_token)}，未写入 config.json')
+        else:
+            path = update_config(disk_token)
+            print(f'\n已更新: {path}')
+            print(f'  lightnovel.refresh_token 已更新（磁盘读取，长度 {len(disk_token)}）')
+        return 0
+
+    # 磁盘读不到（token 落在 .ldb 或未登录）→ 回退浏览器 CDP 法
+    if not args.print:
+        print('  磁盘未读到 token，回退浏览器 CDP 读取...', file=sys.stderr)
 
     exe = _exe_for(browser, user_data_root, args.port)
     url = 'https://www.lightnovel.app/'
