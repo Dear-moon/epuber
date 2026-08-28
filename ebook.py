@@ -195,7 +195,7 @@ def _record_lightnovel(bid, book_dir, epub_path):
 
 
 def cmd_lightnovel(args):
-    """lightnovel.app API 抓取 (Dart 桥接)"""
+    """lightnovel.app API 抓取 (纯 Python SignalR LongPolling)"""
     # Extract flags and options
     force = '--force' in args
     pack_only = '--pack-only' in args
@@ -256,7 +256,7 @@ def cmd_lightnovel(args):
         spec = importlib.util.spec_from_file_location('api', str(SCRIPTS / 'lightnovel_api.py'))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        data = mod._fetch_chapter_via_dart(token, bid, 1)
+        data = mod._fetch_chapter(token, bid, 1)
         total = len(data['Chapter'].get('Chapters', [])) or 1
         book_name = data['Chapter'].get('BookName', '')
 
@@ -497,8 +497,10 @@ def cmd_ocr(args):
 def print_help():
     print(__doc__)
     print("子命令:")
-    print("  lightnovel     lightnovel.app API 抓取 (Dart 桥接)")
+    print("  lightnovel     lightnovel.app API 抓取 (纯 Python LongPolling)")
     print("                 --all 自动抓取全部章节 → 自动压制 EPUB")
+    print("                 --download 直接下载整本 EPUB (需金币/权限)")
+    print("                 --convert t2s|s2t 服务端简繁转换")
     print("                 --pack-only 已有文件直接压制 EPUB")
     print("                 --no-epub 跳过自动压制")
     print("  syosetu        syosetu.org CDP 抓取 (Cloudflare 穿透)")

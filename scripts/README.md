@@ -72,10 +72,8 @@ setup.bat
 # 手动安装
 pip install -r requirements.txt
 
-# lightnovel.app 抓取: 已预编译 bridge.exe，无需 Dart SDK
-# 如需从源码重新编译 bridge:
-#   winget install Google.DartSDK
-#   cd scripts/dart_bridge && dart compile exe bin/lightnovel_bridge.dart -o bin/lightnovel_bridge.exe
+# lightnovel.app 抓取: 纯 Python LongPolling（lightnovel_client.py），
+# 无需 Dart SDK / bridge.exe；仅需 pip install curl_cffi
 ```
 
 ## 配置
@@ -191,19 +189,25 @@ python scripts/lightnovel_decode.py snapshot.txt -o output.txt
 python scripts/lightnovel_decode.py --html "<div>...</div>" --font-url "https://api.lightnovel.life/font/xxx.woff2"
 ```
 
-### 6a. lightnovel.app API 抓取（Dart 桥接，推荐）
+### 6a. lightnovel.app API 抓取（纯 Python LongPolling，推荐）
+
+无 WebSocket / 无 Dart。服务器按 TLS 指纹拦非浏览器 WebSocket，但 SignalR 的 **LongPolling 传输是纯 HTTP**，curl_cffi（浏览器 TLS 指纹）即可全链路：`refresh → negotiate → handshake → invoke → poll`（详见 `lightnovel_client.py`）。
 
 ```bash
 # 单章 → 自动存入 D:\YyumekO\Documents\ebook\fetch\{书名}\
 python scripts/lightnovel_api.py --bid <BID> --chapter <CID> --html
 
-# 指定路径
-python scripts/lightnovel_api.py --bid <BID> --chapter <CID> --html my.html
+# 服务端简繁转换（t2s=简, s2t=繁）
+python scripts/lightnovel_api.py --bid <BID> --chapter <CID> --convert t2s
 
-# 批量抓取全部章节
-for ch in $(seq 1 18); do
-  python scripts/lightnovel_api.py --bid <BID> --chapter <CID> --html
-done
+# 整本 EPUB 直接下载（需下载权限/金币）
+python scripts/lightnovel_api.py --bid <BID> --download
+
+# 指定后端（默认自动 failover: api.lightnovel.life -> cf-api.lightnovel.life）
+python scripts/lightnovel_api.py --bid <BID> --chapter 1 --base https://cf-api.lightnovel.life
+
+# 批量抓取全部章节（ebook.py 封装）
+python ebook.py lightnovel --bid <BID> --all
 
 # HTML → 字体嵌入 EPUB（WOFF2 自动转 TTF，兼容更广）
 python scripts/html2epub_font.py "D:\YyumekO\Documents\ebook\fetch\<BOOK_DIR>" \
@@ -265,7 +269,8 @@ VLM OCR 字形对照表方案，输出完全无需字体的纯 Unicode EPUB。�
 | `syosetu_fetch.py` | syosetu.org CDP 抓取（TXT / HTML+插图） | 3 |
 | `wenku8_fetch.py` | wenku8.net CDP 抓取 | 4 |
 | `lightnovel_decode.py` | lightnovel.app 字体解码（离线快照） | 5 |
-| `lightnovel_api.py` | lightnovel.app Dart 桥接 API 抓取 | 6a |
+| `lightnovel_api.py` | lightnovel.app API 抓取（纯 Python LongPolling，含整本下载/简繁转换） | 6a |
+| `lightnovel_client.py` | lightnovel.app SignalR LongPolling 客户端（msgpack + 下载） | 6a |
 | `html2epub_font.py` | HTML 目录 → 字体嵌入 EPUB（WOFF2→TTF + 插图） | 6a/6b |
 | `html2txt.py` | HTML → 截屏分条 → VLM OCR 纯文本 | 6a |
 | `build_decode_map.py` | [实验] VLM OCR 字形映射表脚手架 | 6b |

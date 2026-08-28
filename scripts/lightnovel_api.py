@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Lightnovel.app full API pipeline — Dart WebSocket bridge for SignalR.
-Server blocks non-Dart WebSocket TLS fingerprints; Dart's native BoringSSL passes.
+Lightnovel.app API pipeline — pure-Python SignalR LongPolling (no Dart/WebSocket).
+The server's network layer drops non-browser WebSocket TLS fingerprints, but the
+SignalR LongPolling transport is plain HTTP(S), so curl_cffi (browser TLS
+impersonation) works end-to-end (see lightnovel_client.py).
 
 Usage:
-  1. Install Dart SDK: winget install Google.DartSDK
-  2. Fill in REFRESH_TOKEN below (from browser → DevTools → Application → Local Storage →
-     key: sb-yywiuxedvyfxdpznoyqy-auth-token)
-  3. python lightnovel_api.py --bid <BID> --chapter <CID>
+  1. Fill in refresh token: python ebook.py refresh-token  (or set config.lightnovel.refresh_token)
+  2. python lightnovel_api.py --bid <BID> --chapter <SORTNUM>     # single chapter
+     python lightnovel_api.py --bid <BID> --download              # whole-book EPUB (needs coins)
+     python lightnovel_api.py --bid <BID> --chapter 1 --convert t2s  # server-side simplified
 """
 
 import sys, io, json, re, subprocess, argparse, time
@@ -31,96 +33,94 @@ if sys.platform == 'win32':
 # REFRESH_TOKEN is now in config.json — see config.example.json for template
 REFRESH_TOKEN = None  # Loaded lazily from config in main()
 
-API_BASE = "https://api.lightnovel.life"
 USER_AGENT = "Novella/1.8.0"
 
-# Path to Dart SDK and bridge script
-DART_EXE = None  # Auto-detect; set manually if needed
-BRIDGE_SCRIPT = Path(__file__).parent / "dart_bridge" / "bin" / "lightnovel_bridge.dart"
+# Backend mirrors (web frontend serves the same hub behind both). Primary first;
+# when config.api_base is empty we fail over primary -> cf-api.
+PRIMARY_BASE = "https://api.lightnovel.life"
+CF_BASE = "https://cf-api.lightnovel.life"
+API_BASE = PRIMARY_BASE  # resolved per-request via _resolve_base()
+_active_base = None      # set after a successful request (drives font/image URLs)
 
 
-def _find_dart():
-    """Auto-detect Dart executable."""
-    if DART_EXE:
-        return DART_EXE
-
-    import shutil
-    # Check common locations
-    candidates = [
-        # winget install location
-        Path.home() / "AppData" / "Local" / "Microsoft" / "WinGet" / "Packages",
-        # Direct PATH lookup
-        shutil.which("dart"),
-        shutil.which("dart.exe"),
-    ]
-
-    # Search winget packages for Dart SDK
-    winget_pkg = Path.home() / "AppData" / "Local" / "Microsoft" / "WinGet" / "Packages"
-    if winget_pkg.exists():
-        for d in winget_pkg.iterdir():
-            if d.name.startswith("Google.DartSDK"):
-                dart = d / "dart-sdk" / "bin" / "dart.exe"
-                if dart.exists():
-                    return str(dart)
-
-    for c in candidates:
-        if isinstance(c, str) and c:
-            return c
-
-    return None
+def _resolve_base(override=None):
+    """Resolve the working backend base. Priority: --base > config.api_base > env > primary."""
+    if override:
+        return override.rstrip('/')
+    try:
+        from config import get
+        cfg = get('lightnovel.api_base', None)
+        if cfg:
+            return cfg.rstrip('/')
+    except Exception:
+        pass
+    return PRIMARY_BASE
 
 
-def _fetch_chapter_via_dart(token, bid, chapter):
-    """Call Dart bridge via subprocess to fetch chapter data.
-    Prefers pre-compiled .exe; falls back to `dart run`."""
-    bridge_exe = BRIDGE_SCRIPT.with_suffix('.exe')
+def _candidate_bases(override=None):
+    """Ordered list of bases to try for a forward request (map to fault tolerance)."""
+    if override:
+        return [override.rstrip('/')]
+    try:
+        from config import get
+        cfg = get('lightnovel.api_base', None)
+        if cfg:
+            return [cfg.rstrip('/')]
+    except Exception:
+        pass
+    return [PRIMARY_BASE, CF_BASE]
 
-    if bridge_exe.exists():
-        # Pre-compiled standalone executable (no Dart SDK needed)
-        cmd = [
-            str(bridge_exe),
-            "--token", token,
-            "--bid", str(bid),
-            "--chapter", str(chapter),
-        ]
-        print(f"Bridge (exe): {bridge_exe}", file=sys.stderr)
-    else:
-        dart = _find_dart()
-        if not dart:
-            raise RuntimeError(
-                "Dart SDK not found. Install with: winget install Google.DartSDK\n"
-                "Or set DART_EXE in the script."
-            )
-        if not BRIDGE_SCRIPT.exists():
-            raise RuntimeError(f"Dart bridge script not found: {BRIDGE_SCRIPT}")
-        cmd = [
-            dart, "run", str(BRIDGE_SCRIPT),
-            "--token", token,
-            "--bid", str(bid),
-            "--chapter", str(chapter),
-        ]
-        print(f"Dart: {dart}", file=sys.stderr)
-        print(f"Bridge: {BRIDGE_SCRIPT}", file=sys.stderr)
 
-    result = subprocess.run(
-        cmd, capture_output=True, text=False, timeout=45,
-        cwd=str(BRIDGE_SCRIPT.parent.parent),  # dart_bridge/ directory
-    )
+def _fetch_chapter(token, bid, chapter, convert=None, base=None, attempts=3):
+    """Fetch a chapter's content via the pure-Python SignalR LongPolling client.
 
-    # Dart prints logs to stderr, JSON to stdout
-    stderr_text = result.stderr.decode('utf-8', errors='replace') if isinstance(result.stderr, bytes) else result.stderr
-    if stderr_text:
-        for line in stderr_text.strip().split('\n'):
-            print(f"  [dart] {line}", file=sys.stderr)
+    curl_cffi on Windows intermittently throws a transient TLS error
+    (invalid library (0)); retry transport failures a few times per base before
+    failing over. Server logic errors (SignalRError, e.g. "insufficient coins")
+    are real responses and propagate immediately. The first success becomes the
+    module's _active_base so downstream font/image URLs hit the same host.
+    """
+    global _active_base
+    from lightnovel_client import LightnovelClient, SignalRError
 
-    if result.returncode != 0:
-        raise RuntimeError(f"Dart bridge exited with code {result.returncode}")
+    params = {'Bid': bid, 'SortNum': chapter}
+    if convert:
+        params['Convert'] = convert
 
-    stdout_text = result.stdout.decode('utf-8', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
-    if not stdout_text.strip():
-        raise RuntimeError("Dart bridge returned empty output")
+    last = None
+    for b in _candidate_bases(base):
+        for attempt in range(attempts):
+            try:
+                print(f"Fetching via {b} (try {attempt + 1}) ...", file=sys.stderr)
+                c = LightnovelClient(b, token)
+                c.connect()
+                data = c.invoke('GetNovelContent', params)
+                _active_base = b
+                return data
+            except SignalRError:
+                raise  # real server response; no point retrying or failing over
+            except Exception as e:  # noqa: BLE001 — transport flake, retry
+                last = e
+                print(f"  {b} try {attempt + 1}: {type(e).__name__}: {e}", file=sys.stderr)
+                time.sleep(1.0)
+                continue
+    raise last if last else RuntimeError(f"all bases failed for bid={bid}")
 
-    return json.loads(stdout_text.strip().split('\n')[-1])  # Last line is JSON
+
+def download_book_to(token, bid, out_dir, base=None):
+    """Download the whole book as a ready-made EPUB. Returns the saved path."""
+    from lightnovel_client import download_book
+    global _active_base
+
+    b = _resolve_base(base)
+    bearer = None
+    # We already have a connected client pattern; just reuse the token exchange here.
+    bytes_, fname = download_book(b, token, bid, bearer=None)
+    name = fname or f"book_{bid}.epub"
+    out = Path(out_dir) / name
+    out.write_bytes(bytes_)
+    _active_base = b
+    return out
 
 
 # ============================================================
@@ -134,9 +134,14 @@ except ImportError:
     _has_curl = False
 
 
+def _current_base():
+    """Base used for asset URLs; falls back to the configured/primary base."""
+    return _active_base or _resolve_base()
+
+
 def _download_font(font_path):
     """Download a chapter font file. Uses curl_cffi if available."""
-    url = f"{API_BASE}{font_path}"
+    url = f"{_current_base()}{font_path}"
     print(f"Downloading font: {url}", file=sys.stderr)
 
     if _has_curl:
@@ -180,7 +185,7 @@ def _extract_and_download_images(html, book_dir):
 
         # Resolve relative URLs
         if src.startswith('/'):
-            src = f'https://api.lightnovel.life{src}'
+            src = f'{_current_base()}{src}'
 
         # Skip already-local paths
         if not src.startswith('http'):
@@ -385,12 +390,17 @@ def _mark_memory(bid, chapter, book_name):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Lightnovel.app API chapter fetcher (Dart bridge)')
+    parser = argparse.ArgumentParser(description='Lightnovel.app API fetcher (pure-Python SignalR LongPolling)')
     parser.add_argument('--bid', type=int, required=True, help='Book ID')
-    parser.add_argument('--chapter', type=int, required=True, help='Chapter SortNum')
+    parser.add_argument('--chapter', type=int, help='Chapter SortNum (required in chapter mode)')
     parser.add_argument('-o', '--output', help='Output file (text)')
     parser.add_argument('--html', nargs='?', const='__AUTO__',
                         help='Output self-contained HTML (auto-named if no path given)')
+    parser.add_argument('--convert', choices=['t2s', 's2t'],
+                        help='Server-side simplified/traditional conversion')
+    parser.add_argument('--download', action='store_true',
+                        help='Download whole book as ready-made EPUB')
+    parser.add_argument('--base', help='Backend base URL (default: failover primary -> cf-api)')
     parser.add_argument('--token', help='Refresh token (overrides config)')
     parser.add_argument('--raw-json', help='Save raw JSON from API (for debugging)')
     parser.add_argument('--no-memory', action='store_true', help='Skip fetch memory recording')
@@ -407,10 +417,25 @@ def main():
 
     fetch_dir = get_fetch_dir()
 
-    # Step 1: Fetch chapter via Dart bridge
-    print(f"\nFetching book {args.bid} chapter {args.chapter} via Dart bridge...", file=sys.stderr)
+    if args.download:
+        from lightnovel_client import SignalRError
+        try:
+            out = download_book_to(token, args.bid, fetch_dir, base=args.base)
+        except SignalRError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Downloaded EPUB: {out}", file=sys.stderr)
+        return
+
+    if not args.chapter:
+        print("ERROR: --chapter required (or use --download)", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 1: Fetch chapter via pure-Python SignalR LongPolling client
+    print(f"\nFetching book {args.bid} chapter {args.chapter} ...", file=sys.stderr)
     try:
-        data = _fetch_chapter_via_dart(token, args.bid, args.chapter)
+        data = _fetch_chapter(token, args.bid, args.chapter,
+                              convert=args.convert, base=args.base)
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)

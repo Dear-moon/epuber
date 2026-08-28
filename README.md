@@ -15,7 +15,7 @@ Fetch from lightnovel.app, syosetu.org, wenku8.net, novelia.cc and output font-e
 - **`--all` auto-pack** — fetch all chapters then automatically pack into EPUB
 - **`--pack-only`** — skip fetching, pack existing HTML files directly into EPUB
 - **Encoding detection + chapter parsing** — smart TXT encoding detection, chapter title recognition, paragraph merging, noise removal
-- **Pre-compiled Dart bridge** — no Dart SDK required, works out of the box (Windows)
+- **Pure-Python LightNovelShelf client** — SignalR LongPolling, no Dart SDK / WebSocket TLS workaround
 
 ## Quick Start
 
@@ -62,8 +62,7 @@ setup.bat
 pip install -r requirements.txt
 ```
 
-The Dart bridge is **pre-compiled** (`lightnovel_bridge.exe`). No Dart SDK installation needed.  
-To recompile from source: `winget install Google.DartSDK` then `dart compile exe bin/lightnovel_bridge.dart`.
+The LightNovelShelf client is **pure Python** (SignalR LongPolling via curl_cffi). No Dart SDK / bridge executable needed.
 
 ## Configuration
 
@@ -173,9 +172,9 @@ python scripts/lightnovel_decode.py --html-file page.html --font-url "https://..
                  └──────────┘      Kindle / Kobo / Apple Books
 ```
 
-### Why Dart Bridge?
+### Why SignalR LongPolling (not WebSocket)?
 
-lightnovel.app's SignalR WebSocket server performs **TLS fingerprinting** — standard Python WebSocket libraries (`websockets`, `websocket-client`) are rejected. Dart's native `dart:io` HttpClient uses BoringSSL, matching the Novella mobile app's fingerprint.
+lightnovel.app's SignalR server performs **WebSocket TLS fingerprinting** — Python WebSocket libraries (`websockets`, `websocket-client`) are rejected on the handshake. The SignalR **LongPolling** transport is plain HTTP(S), which curl_cffi (impersonating a browser TLS fingerprint) passes. So chapter content is fetched over LongPolling with no WebSocket and no language runtime beyond Python. Protocol details (negotiate → handshake → invoke → poll) live in `lightnovel_client.py`.
 
 ### Why Font Embedding?
 
@@ -192,7 +191,8 @@ lightnovel.app delivers chapter text with characters mapped to **Unicode PUA** (
 |--------|---------|
 | `ebook.py` | Unified CLI entry point |
 | `scripts/convert.py` | TXT → EPUB (encoding detection, chapter parsing, noise removal) |
-| `scripts/lightnovel_api.py` | lightnovel.app Dart bridge API fetcher |
+| `scripts/lightnovel_api.py` | lightnovel.app API fetcher (pure-Python LongPolling; +download/convert) |
+| `scripts/lightnovel_client.py` | lightnovel.app SignalR LongPolling client (msgpack + REST download) |
 | `scripts/syosetu_fetch.py` | syosetu.org CDP fetcher (Cloudflare bypass) |
 | `scripts/wenku8_fetch.py` | wenku8.net CDP fetcher |
 | `scripts/web_fetch.py` | novelia.cc REST API fetcher |
@@ -201,7 +201,6 @@ lightnovel.app delivers chapter text with characters mapped to **Unicode PUA** (
 | `scripts/fetch_memory.py` | Fetch memory persistence |
 | `scripts/html2txt.py` | [experimental] VLM OCR pipeline |
 | `scripts/build_decode_map.py` | [experimental] VLM OCR glyph mapping |
-| `scripts/dart_bridge/` | Dart SignalR WebSocket bridge |
 
 ## Dependencies
 
@@ -210,14 +209,14 @@ requests  websocket-client  fonttools  brotli  curl_cffi  Pillow
 ```
 
 All installable via `pip install -r requirements.txt`.  
-Pre-compiled Dart bridge included — no Dart SDK required.
+No Dart SDK needed — the LightNovelShelf client is pure Python.
 
 ## Notes
 
 - **Config security**: `config.json` contains your lightnovel.app refresh token. It is excluded from the distribution zip and git-ignored.
 - **Memory durability**: Fetch memory is stored in `fetch_memory.json`. This file is personal and excluded from distribution.
 - **Experimental OCR**: The VLM OCR font decoding path (`build_decode_map.py`, `html2txt.py`) is retained as a draft. It works but has accuracy issues with visually similar characters.
-- **Cross-platform**: Primarily developed for Windows. The Dart bridge `.exe` is Windows-only; non-Windows users need Dart SDK to run `dart run`.
+- **Cross-platform**: Fully Python; no language runtime beyond the stock interpreter.
 
 ## License
 

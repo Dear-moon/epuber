@@ -15,7 +15,7 @@
 - **`--all` 自动压制** — 抓取全部章节后自动生成 EPUB，一步到位
 - **`--pack-only`** — 已有抓取文件时直接压制，无需重新抓取
 - **编码检测 + 章节识别** — 智能识别 TXT 编码和章节标题，段落合并，噪音清洗
-- **预编译 Dart bridge** — 无需 Dart SDK，开箱即用（Windows）
+- **纯 Python LightNovelShelf 客户端** — SignalR LongPolling，无需 Dart SDK / WebSocket TLS 绕行
 
 ## 快速开始
 
@@ -62,8 +62,7 @@ setup.bat
 pip install -r requirements.txt
 ```
 
-Dart bridge 已**预编译**为 `lightnovel_bridge.exe`，无需安装 Dart SDK。  
-如需从源码重新编译：`winget install Google.DartSDK` 然后 `dart compile exe bin/lightnovel_bridge.dart`。
+LightNovelShelf 客户端为**纯 Python**（curl_cffi 走 SignalR LongPolling），无需 Dart SDK / bridge 可执行文件。
 
 ## 配置
 
@@ -173,9 +172,9 @@ python scripts/lightnovel_decode.py --html-file page.html --font-url "https://..
                  └──────────┘      Kindle / Kobo / Apple Books
 ```
 
-### 为什么需要 Dart Bridge？
+### 为什么走 SignalR LongPolling（而非 WebSocket）？
 
-lightnovel.app 的 SignalR WebSocket 服务器会进行 **TLS 指纹检测**——标准的 Python WebSocket 库（`websockets`、`websocket-client`）会被拒绝。Dart 原生的 `dart:io` HttpClient 使用 BoringSSL，指纹与 Novella 手机 App 一致，因此可以通过验证。
+lightnovel.app 的 SignalR 服务器会对 WebSocket 做 **TLS 指纹检测**——Python WebSocket 库（`websockets`、`websocket-client`）在握手时被拒绝。而 SignalR 的 **LongPolling 传输是纯 HTTP(S)**，curl_cffi（伪造浏览器 TLS 指纹）可以通过。于是章节内容走 LongPolling 获取，无需 WebSocket、无需额外语言运行时。协议细节（negotiate → handshake → invoke → poll）在 `lightnovel_client.py`。
 
 ### 为什么需要字体嵌入？
 
@@ -192,7 +191,8 @@ lightnovel.app 将章节文字映射到 **Unicode PUA 私用区**（U+E000–F8F
 |------|------|
 | `ebook.py` | 统一 CLI 入口 |
 | `scripts/convert.py` | TXT → EPUB（编码检测、章节识别、噪音清洗） |
-| `scripts/lightnovel_api.py` | lightnovel.app Dart 桥接 API 抓取 |
+| `scripts/lightnovel_api.py` | lightnovel.app API 抓取（纯 Python LongPolling；含整本下载/简繁转换） |
+| `scripts/lightnovel_client.py` | lightnovel.app SignalR LongPolling 客户端（msgpack + REST 下载） |
 | `scripts/syosetu_fetch.py` | syosetu.org CDP 抓取（Cloudflare 穿透） |
 | `scripts/wenku8_fetch.py` | wenku8.net CDP 抓取 |
 | `scripts/web_fetch.py` | novelia.cc REST API 抓取 |
@@ -201,7 +201,6 @@ lightnovel.app 将章节文字映射到 **Unicode PUA 私用区**（U+E000–F8F
 | `scripts/fetch_memory.py` | 抓取记忆持久化 |
 | `scripts/html2txt.py` | [实验] VLM OCR 管线 |
 | `scripts/build_decode_map.py` | [实验] VLM OCR 字形映射表 |
-| `scripts/dart_bridge/` | Dart SignalR WebSocket 桥接 |
 
 ## 依赖
 
@@ -210,14 +209,14 @@ requests  websocket-client  fonttools  brotli  curl_cffi  Pillow
 ```
 
 全部可通过 `pip install -r requirements.txt` 安装。  
-Dart bridge 已预编译，无需 Dart SDK。
+无需 Dart SDK —— LightNovelShelf 客户端是纯 Python。
 
 ## 注意事项
 
 - **配置安全**：`config.json` 包含你的 lightnovel.app refresh_token，已被发行包和 `.gitignore` 排除。
 - **记忆数据**：抓取记忆存储在 `fetch_memory.json` 中，属个人数据，不包含在发行包内。
 - **实验性 OCR**：VLM OCR 字体解码方案（`build_decode_map.py`、`html2txt.py`）作为草案保留，对相似字形（未/末、己/已等）存在偶发误判。
-- **跨平台**：主要在 Windows 上开发。Dart bridge `.exe` 仅限 Windows；非 Windows 用户需安装 Dart SDK 运行 `dart run`。
+- **跨平台**：纯 Python，除默认解释器外无需其它语言运行时。
 
 ## 许可证
 

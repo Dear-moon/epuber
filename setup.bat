@@ -54,8 +54,7 @@ if not exist "%~dp0config.json" (
     echo [*] Creating config.json from template...
     copy "%~dp0config.example.json" "%~dp0config.json" >nul
     echo [INFO] Edit config.json and add your lightnovel.app refresh_token
-    echo       Get it from: DevTools - Application - Local Storage - lightnovel.app
-    echo       Key: sb-yywiuxedvyfxdpznoyqy-auth-token
+    echo       Or run: python ebook.py refresh-token   (auto-read from browser IndexedDB)
 ) else (
     echo [OK] config.json exists
 )
@@ -67,6 +66,7 @@ echo ============================================
 echo.
 echo Usage:
 echo   python ebook.py lightnovel --bid BID --all
+echo   python ebook.py lightnovel --bid BID --download
 echo   python ebook.py syosetu -u "https://syosetu.org/novel/XXXXX/"
 echo   python ebook.py wenku "https://n.novelia.cc/wenku/WID" --list
 echo   python ebook.py lk "https://www.lightnovel.fun/LKID"
