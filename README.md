@@ -8,7 +8,7 @@ Fetch from lightnovel.app, syosetu.org, wenku8.net, novelia.cc and output font-e
 
 ## Features
 
-- **4 fetch sources** — lightnovel.app (pure-Python SignalR LongPolling), syosetu.org (CDP Cloudflare bypass), wenku8.net (CDP), novelia.cc (REST API)
+- **Multiple fetch sources** — lightnovel.app (pure-Python SignalR LongPolling), novelia.cc web + 文库版, lightnovel.fun/轻之国度 (HTTP+login), esjzone & 真白萌 (CDP+login), syosetu.org & wenku8.net (CDP)
 - **Font-embedded EPUB** — auto-download WOFF2 fonts, convert to TTF, embed in EPUB; solves lightnovel.app font obfuscation. The obfuscation font differs **per chapter** (per-fetch randomized), so each chapter keeps its own embedded font.
 - **Illustration embedding** — auto-download chapter images, rewrite `src` to local paths, embed in EPUB
 - **Fetch memory** — per-chapter tracking; re-runs skip already-fetched chapters (great for ongoing serials)
@@ -39,9 +39,13 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "Title" --author "A
 | Source | Method | Font EPUB | Illustrations | Requires |
 |--------|--------|:---------:|:-------------:|----------|
 | [lightnovel.app](https://www.lightnovel.app) | SignalR LongPolling | ✅ | ✅ | refresh_token |
+| [novelia.cc](https://novelia.cc) | REST API | — | — | — |
+| novelia 文库版 | REST API | ✅ | ✅ | — |
+| [lightnovel.fun](https://www.lightnovel.fun) 轻之国度 | HTTP (curl_cffi) + login | — | — | lk.username/password |
+| [esjzone.one](https://www.esjzone.one) | CDP (Edge browser) + login | — | — | esj.username/password + Edge |
+| [masiro.me](https://masiro.me) 真白萌 | CDP (Edge browser) + login | — | — | masiro.username/password + Edge |
 | [syosetu.org](https://syosetu.org) | CDP (Edge browser) | — | ✅ | Edge browser |
 | [wenku8.net](https://www.wenku8.net) | CDP (Edge browser) | — | ✅ | Edge browser |
-| [novelia.cc](https://novelia.cc) | REST API | — | — | — |
 | Local TXT | stdlib | — | — | — |
 
 ## Installation
@@ -49,7 +53,7 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "Title" --author "A
 ### Prerequisites
 
 - Python 3.9+
-- Microsoft Edge (for syosetu/wenku8 CDP fetchers; auto-detected)
+- Microsoft Edge (for syosetu/wenku8/esjzone/masiro CDP fetchers; auto-detected)
 
 ### Setup
 
@@ -112,7 +116,10 @@ python ebook.py lk "https://www.lightnovel.fun/<LKID>"
 # esjzone (requires esj.username/password in config.json; CDP-rendered)
 python ebook.py esj "https://www.esjzone.one/forum/<BOARD>/<ESJID>/"
 
-# Auto-fetch lightnovel.app RefreshToken from browser IndexedDB
+# masiro 真白萌 (requires masiro.username/password; CDP Cloudflare bypass + login)
+python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"
+
+# Auto-fetch lightnovel.app RefreshToken from browser IndexedDB (browser-free disk read)
 python ebook.py refresh-token
 
 # masiro.me (真白萌) — requires masiro.username/password in config.json
