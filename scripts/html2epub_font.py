@@ -56,11 +56,12 @@ _MIME_MAP = {
     'bmp': 'image/bmp',
 }
 
-# Shared body styles. The @font-face is NOT here: each chapter's obfuscation font
-# differs (per-fetch randomized), so it is injected per-chapter into the xhtml head
-# via the {fontstyle} placeholder in _CHAPTER_XHTML.
+# Shared LAYOUT (style.css) — no @font-face, no hard-coded font family. Each obfuscation
+# font gets its own linked css/font{i}.css (@font-face + body{font-family:'NovelFont'})
+# so chapters select their font purely via a LINKED stylesheet — mobile readers (Moon+)
+# honor linked-CSS @font-face but may ignore inline <style>/inline body font-family,
+# so we avoid both. This mirrors the mechanism that already rendered correctly on-device.
 _CSS_FONT = """body {
-  font-family: 'NovelFont', serif;
   max-width: 800px;
   margin: 0 auto;
   padding: 1.5em 1em;
@@ -76,6 +77,12 @@ img { max-width: 100%; height: auto; }
 .illus img { display: block; margin: 1em auto; }
 .cover { text-align: center; text-indent: 0; }
 """
+
+# A per-font stylesheet: @font-face (family 'NovelFont') + body font-family. One per
+# unique obfuscation font; chapters link their own.
+def _font_css(fidx, fext, fformat):
+    return (f"@font-face{{font-family:'NovelFont';src:url('../font{fidx}.{fext}') format('{fformat}');}}\n"
+            "body { font-family: 'NovelFont', serif; }\n")
 
 _CSS_PLAIN = """body {
   font-family: "Microsoft YaHei", "SimSun", "Noto Serif CJK SC", "Yu Mincho", serif;
@@ -99,8 +106,8 @@ _CHAPTER_XHTML = """<?xml version="1.0" encoding="utf-8"?>
 <head>
   <meta charset="utf-8"/>
   <title>{title}</title>
-  {fontstyle}
   <link rel="stylesheet" type="text/css" href="../css/style.css"/>
+  {fontcss}
 </head>
 <body>
 {body}
@@ -221,6 +228,7 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
     manifest_items.append('<item id="css" href="css/style.css" media-type="text/css"/>')
     for i, (fttf, fext, fmime, _) in enumerate(fonts):
         manifest_items.append(f'<item id="font{i}" href="font{i}.{fext}" media-type="{fmime}"/>')
+        manifest_items.append(f'<item id="fcs{i}" href="css/font{i}.css" media-type="text/css"/>')
     manifest_items.append('<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>')
 
     # Images
@@ -256,20 +264,18 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
         zf.writestr("OEBPS/content.opf", opf)
         zf.writestr("OEBPS/toc.ncx", ncx)
         zf.writestr("OEBPS/css/style.css", _CSS_FONT if has_font else _CSS_PLAIN)
-        for i, (fttf, fext, fmime, _) in enumerate(fonts):
+        for i, (fttf, fext, fmime, fformat) in enumerate(fonts):
             zf.writestr(f"OEBPS/font{i}.{fext}", fttf)
+            # Per-font linked stylesheet: @font-face + body font-family (both in a
+            # LINKED css so mobile readers honor them; no inline styles needed).
+            zf.writestr(f"OEBPS/css/font{i}.css", _font_css(i, fext, fformat))
 
         for fname, data in image_files.items():
             zf.writestr(f"OEBPS/images/{fname}", data)
 
         for i, (ch_title, body, fidx) in enumerate(chapters):
-            if fidx is not None:
-                _, fext, _, fformat = fonts[fidx]
-                fontstyle = (f'<style>@font-face{{font-family:\'NovelFont\';'
-                             f'src:url(\'../font{fidx}.{fext}\') format(\'{fformat}\');}}</style>')
-            else:
-                fontstyle = ''
-            xhtml = _CHAPTER_XHTML.format(title=ch_title, fontstyle=fontstyle, body=body)
+            fontcss = f'  <link rel="stylesheet" type="text/css" href="../css/font{fidx}.css"/>' if fidx is not None else ''
+            xhtml = _CHAPTER_XHTML.format(title=ch_title, fontcss=fontcss, body=body)
             zf.writestr(f"OEBPS/chapters/ch{i:04d}.xhtml", xhtml)
 
     size_mb = output_path.stat().st_size / (1024 * 1024)
