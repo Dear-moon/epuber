@@ -78,11 +78,14 @@ img { max-width: 100%; height: auto; }
 .cover { text-align: center; text-indent: 0; }
 """
 
-# A per-font stylesheet: @font-face (family 'NovelFont') + body font-family. One per
-# unique obfuscation font; chapters link their own.
+# A per-font stylesheet. Each font gets a UNIQUE family name (NovelFont{i}) — readers
+# resolve @font-face by family name GLOBALLY across the whole book's css, so a shared
+# 'NovelFont' name across multiple font css files would collide and clamp every chapter
+# to the first-loaded font. Unique names keep each chapter bound to its own font.
 def _font_css(fidx, fext, fformat):
-    return (f"@font-face{{font-family:'NovelFont';src:url('../font{fidx}.{fext}') format('{fformat}');}}\n"
-            "body { font-family: 'NovelFont', serif; }\n")
+    fam = f"NovelFont{fidx}"
+    return (f"@font-face{{font-family:'{fam}';src:url('../font{fidx}.{fext}') format('{fformat}');}}\n"
+            f"body {{ font-family: '{fam}', serif; }}\n")
 
 _CSS_PLAIN = """body {
   font-family: "Microsoft YaHei", "SimSun", "Noto Serif CJK SC", "Yu Mincho", serif;
