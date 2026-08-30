@@ -8,8 +8,8 @@
 
 ## 功能特性
 
-- **4 个抓取源** — lightnovel.app（Dart SignalR 桥接）、syosetu.org（CDP Cloudflare 穿透）、wenku8.net（CDP）、novelia.cc（REST API）
-- **字体嵌入 EPUB** — 自动下载 WOFF2 字体并转换为 TTF 嵌入，解决 lightnovel.app 字体混淆问题
+- **4 个抓取源** — lightnovel.app（纯 Python SignalR LongPolling）、syosetu.org（CDP Cloudflare 穿透）、wenku8.net（CDP）、novelia.cc（REST API）
+- **字体嵌入 EPUB** — 自动下载 WOFF2 字体并转换为 TTF 嵌入，解决 lightnovel.app 字体混淆问题。混淆字体**每章不同**（per-fetch 随机置换），故每章保留自己嵌入的字体。
 - **插图嵌入** — 自动下载章节插图，改写为本地路径，嵌入 EPUB
 - **抓取记忆** — 按章节记录已抓取内容，重复运行时自动跳过，支持连载追更
 - **`--all` 自动压制** — 抓取全部章节后自动生成 EPUB，一步到位
@@ -38,7 +38,7 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "书名" --author "
 
 | 源 | 方式 | 字体 EPUB | 插图 | 需要 |
 |---|------|:---------:|:----:|------|
-| [lightnovel.app](https://www.lightnovel.app) | Dart SignalR 桥接 | ✅ | ✅ | refresh_token |
+| [lightnovel.app](https://www.lightnovel.app) | SignalR LongPolling | ✅ | ✅ | refresh_token |
 | [syosetu.org](https://syosetu.org) | CDP（Edge 浏览器） | — | ✅ | Edge 浏览器 |
 | [wenku8.net](https://www.wenku8.net) | CDP（Edge 浏览器） | — | ✅ | Edge 浏览器 |
 | [novelia.cc](https://novelia.cc) | REST API | — | — | — |
@@ -88,6 +88,8 @@ LightNovelShelf 客户端为**纯 Python**（curl_cffi 走 SignalR LongPolling�
 python ebook.py lightnovel --bid <BID> --chapter <CID> --html     # 单章 HTML
 python ebook.py lightnovel --bid <BID> --all                       # 全部章节 → 自动 EPUB
 python ebook.py lightnovel --bid <BID> --all --no-epub             # 只抓取不压制
+python ebook.py lightnovel --bid <BID> --download                  # 直接下载整本 EPUB（需金币/权限）
+python ebook.py lightnovel --bid <BID> --chapter 1 --convert t2s   # 服务端简繁转换
 python ebook.py lightnovel --bid <BID> --pack-only                 # 已有文件直接压制
 python ebook.py lightnovel --bid <BID> --pack-only --author "作者名"
 

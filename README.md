@@ -8,8 +8,8 @@ Fetch from lightnovel.app, syosetu.org, wenku8.net, novelia.cc and output font-e
 
 ## Features
 
-- **4 fetch sources** — lightnovel.app (Dart SignalR bridge), syosetu.org (CDP Cloudflare bypass), wenku8.net (CDP), novelia.cc (REST API)
-- **Font-embedded EPUB** — auto-download WOFF2 fonts, convert to TTF, embed in EPUB; solves lightnovel.app font obfuscation
+- **4 fetch sources** — lightnovel.app (pure-Python SignalR LongPolling), syosetu.org (CDP Cloudflare bypass), wenku8.net (CDP), novelia.cc (REST API)
+- **Font-embedded EPUB** — auto-download WOFF2 fonts, convert to TTF, embed in EPUB; solves lightnovel.app font obfuscation. The obfuscation font differs **per chapter** (per-fetch randomized), so each chapter keeps its own embedded font.
 - **Illustration embedding** — auto-download chapter images, rewrite `src` to local paths, embed in EPUB
 - **Fetch memory** — per-chapter tracking; re-runs skip already-fetched chapters (great for ongoing serials)
 - **`--all` auto-pack** — fetch all chapters then automatically pack into EPUB
@@ -38,7 +38,7 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "Title" --author "A
 
 | Source | Method | Font EPUB | Illustrations | Requires |
 |--------|--------|:---------:|:-------------:|----------|
-| [lightnovel.app](https://www.lightnovel.app) | Dart SignalR bridge | ✅ | ✅ | refresh_token |
+| [lightnovel.app](https://www.lightnovel.app) | SignalR LongPolling | ✅ | ✅ | refresh_token |
 | [syosetu.org](https://syosetu.org) | CDP (Edge browser) | — | ✅ | Edge browser |
 | [wenku8.net](https://www.wenku8.net) | CDP (Edge browser) | — | ✅ | Edge browser |
 | [novelia.cc](https://novelia.cc) | REST API | — | — | — |
@@ -88,6 +88,8 @@ Or use environment variables: `LIGHTNOVEL_REFRESH_TOKEN`, `FETCH_DIR`, `EDGE_PAT
 python ebook.py lightnovel --bid <BID> --chapter <CID> --html     # single chapter HTML
 python ebook.py lightnovel --bid <BID> --all                       # all chapters → auto EPUB
 python ebook.py lightnovel --bid <BID> --all --no-epub             # fetch only, skip packing
+python ebook.py lightnovel --bid <BID> --download                  # whole-book EPUB directly (needs coins/permission)
+python ebook.py lightnovel --bid <BID> --chapter 1 --convert t2s   # server-side simplified conversion
 python ebook.py lightnovel --bid <BID> --pack-only                 # pack existing files
 python ebook.py lightnovel --bid <BID> --pack-only --author "Author"
 
