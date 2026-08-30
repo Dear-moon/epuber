@@ -8,7 +8,7 @@ Fetch from lightnovel.app, syosetu.org, wenku8.net, novelia.cc and output font-e
 
 ## Features
 
-- **Multiple fetch sources** — lightnovel.app (pure-Python SignalR LongPolling), novelia.cc web + 文库版, lightnovel.fun/轻之国度 (HTTP+login), esjzone & 真白萌 (CDP+login), syosetu.org & wenku8.net (CDP)
+- **Multiple fetch sources** — lightnovel.app (pure-Python SignalR LongPolling), novelia.cc web + 文库版, lightnovel.fun/轻之国度 (HTTP+login), esjzone & 真白萌 (CDP+login), wenku8.net (pure HTTP, GBK), syosetu.org (CDP)
 - **Font-embedded EPUB** — auto-download WOFF2 fonts, convert to TTF, embed in EPUB; solves lightnovel.app font obfuscation. The obfuscation font differs **per chapter** (per-fetch randomized), so each chapter keeps its own embedded font.
 - **Illustration embedding** — auto-download chapter images, rewrite `src` to local paths, embed in EPUB
 - **Fetch memory** — per-chapter tracking; re-runs skip already-fetched chapters (great for ongoing serials)
@@ -44,8 +44,8 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "Title" --author "A
 | [lightnovel.fun](https://www.lightnovel.fun) 轻之国度 | HTTP (curl_cffi) + login | — | — | lk.username/password |
 | [esjzone.one](https://www.esjzone.one) | CDP (Edge browser) + login | — | — | esj.username/password + Edge |
 | [masiro.me](https://masiro.me) 真白萌 | CDP (Edge browser) + login | — | — | masiro.username/password + Edge |
+| [wenku8.net](https://www.wenku8.net) | HTTP (GBK HTML) | — | ✅ | — |
 | [syosetu.org](https://syosetu.org) | CDP (Edge browser) | — | ✅ | Edge browser |
-| [wenku8.net](https://www.wenku8.net) | CDP (Edge browser) | — | ✅ | Edge browser |
 | Local TXT | stdlib | — | — | — |
 
 ## Installation
@@ -53,7 +53,7 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "Title" --author "A
 ### Prerequisites
 
 - Python 3.9+
-- Microsoft Edge (for syosetu/wenku8/esjzone/masiro CDP fetchers; auto-detected)
+- Microsoft Edge (for syosetu/esjzone/masiro CDP fetchers; auto-detected)
 
 ### Setup
 

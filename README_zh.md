@@ -8,7 +8,7 @@
 
 ## 功能特性
 
-- **多抓取源** — lightnovel.app（纯 Python SignalR LongPolling）、novelia.cc web + 文库版、lightnovel.fun 轻之国度（HTTP+登录）、esjzone & 真白萌（CDP+登录）、syosetu.org & wenku8.net（CDP）
+- **多抓取源** — lightnovel.app（纯 Python SignalR LongPolling）、novelia.cc web + 文库版、lightnovel.fun 轻之国度（HTTP+登录）、esjzone & 真白萌（CDP+登录）、wenku8.net（纯 HTTP, GBK）、syosetu.org（CDP）
 - **字体嵌入 EPUB** — 自动下载 WOFF2 字体并转换为 TTF 嵌入，解决 lightnovel.app 字体混淆问题。混淆字体**每章不同**（per-fetch 随机置换），故每章保留自己嵌入的字体。
 - **插图嵌入** — 自动下载章节插图，改写为本地路径，嵌入 EPUB
 - **抓取记忆** — 按章节记录已抓取内容，重复运行时自动跳过，支持连载追更
@@ -44,8 +44,8 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "书名" --author "
 | [lightnovel.fun](https://www.lightnovel.fun) 轻之国度 | HTTP (curl_cffi) + 登录 | — | — | lk.username/password |
 | [esjzone.one](https://www.esjzone.one) | CDP（Edge 浏览器）+ 登录 | — | — | esj.username/password + Edge |
 | [masiro.me](https://masiro.me) 真白萌 | CDP（Edge 浏览器）+ 登录 | — | — | masiro.username/password + Edge |
+| [wenku8.net](https://www.wenku8.net) | HTTP（GBK HTML） | — | ✅ | — |
 | [syosetu.org](https://syosetu.org) | CDP（Edge 浏览器） | — | ✅ | Edge 浏览器 |
-| [wenku8.net](https://www.wenku8.net) | CDP（Edge 浏览器） | — | ✅ | Edge 浏览器 |
 | 本地 TXT | stdlib | — | — | — |
 
 ## 安装
@@ -53,7 +53,7 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "书名" --author "
 ### 前置条件
 
 - Python 3.9+
-- Microsoft Edge（syosetu/wenku8/esjzone/masiro CDP 抓取需要；自动探测路径）
+- Microsoft Edge（syosetu/esjzone/masiro CDP 抓取需要；自动探测路径）
 
 ### 安装步骤
 
