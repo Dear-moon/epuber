@@ -56,11 +56,10 @@ _MIME_MAP = {
     'bmp': 'image/bmp',
 }
 
-_CSS_FONT = """@font-face {
-  font-family: 'NovelFont';
-  src: url('../font.__FEXT__') format('__FFMT__');
-}
-body {
+# Shared body styles. The @font-face is NOT here: each chapter's obfuscation font
+# differs (per-fetch randomized), so it is injected per-chapter into the xhtml head
+# via the {fontstyle} placeholder in _CHAPTER_XHTML.
+_CSS_FONT = """body {
   font-family: 'NovelFont', serif;
   max-width: 800px;
   margin: 0 auto;
@@ -100,6 +99,7 @@ _CHAPTER_XHTML = """<?xml version="1.0" encoding="utf-8"?>
 <head>
   <meta charset="utf-8"/>
   <title>{title}</title>
+  {fontstyle}
   <link rel="stylesheet" type="text/css" href="../css/style.css"/>
 </head>
 <body>
@@ -181,29 +181,33 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
 
     print(f"Found {len(html_files)} HTML files, {len(image_files)} images", file=sys.stderr)
 
-    # Read all chapters
-    chapters = []
-    font_bytes = None
+    # Read all chapters. The obfuscation font differs per chapter (per-fetch
+    # randomized), so we keep each chapter's OWN font instead of collapsing to one.
+    chapters = []          # (ch_title, body, font_index_or_None)
+    fonts = []             # list of (ttf_bytes, ext, mime, font_format)
+    font_seen = {}         # md5(base64 font) -> index in fonts
     for p in html_files:
         text = p.read_text(encoding='utf-8')
         fb, body = _extract_font_and_body(text)
-        if font_bytes is None:
-            font_bytes = fb
         ch_title = p.stem
-        # Rewrite image src from images/xxx.jpg to ../images/xxx.jpg (EPUB path)
         body = re.sub(r'src="images/', 'src="../images/', body)
-        chapters.append((ch_title, body))
+        fidx = None
+        if fb is not None:
+            key = hash(fb)
+            if key in font_seen:
+                fidx = font_seen[key]
+            else:
+                fidx = len(fonts)
+                font_seen[key] = fidx
+                ttf, fext, fmime = _woff2_to_ttf(fb)
+                fformat = 'truetype' if fext == 'ttf' else 'opentype'
+                fonts.append((ttf, fext, fmime, fformat))
+                print(f"  Font #{fidx} converted: WOFF2 → {fext.upper()} ({len(ttf):,} bytes)", file=sys.stderr)
+        chapters.append((ch_title, body, fidx))
         print(f"  {p.name}: {len(body)} chars body", file=sys.stderr)
 
-    has_font = font_bytes is not None
-    font_ext = 'woff2'
-    font_mime = 'font/woff2'
-    font_format = 'woff2'
-    if has_font:
-        font_bytes, font_ext, font_mime = _woff2_to_ttf(font_bytes)
-        font_format = 'truetype' if font_ext == 'ttf' else 'opentype'
-        print(f"  Font converted: WOFF2 → {font_ext.upper()} ({len(font_bytes):,} bytes)", file=sys.stderr)
-    else:
+    has_font = len(fonts) > 0
+    if not has_font:
         print("  No embedded font found, using standard CSS", file=sys.stderr)
 
     uid = f"lightnovel-{hash(title)}-{len(chapters)}"
@@ -213,10 +217,10 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
     spine_items = []
     ncx_items = []
 
-    # CSS + NCX
+    # CSS + fonts + NCX
     manifest_items.append('<item id="css" href="css/style.css" media-type="text/css"/>')
-    if has_font:
-        manifest_items.append(f'<item id="font" href="font.{font_ext}" media-type="{font_mime}"/>')
+    for i, (fttf, fext, fmime, _) in enumerate(fonts):
+        manifest_items.append(f'<item id="font{i}" href="font{i}.{fext}" media-type="{fmime}"/>')
     manifest_items.append('<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>')
 
     # Images
@@ -232,7 +236,7 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
         )
 
     # Chapters
-    for i, (ch_title, body) in enumerate(chapters):
+    for i, (ch_title, body, _fidx) in enumerate(chapters):
         fid = f"ch{i:04d}"
         manifest_items.append(
             f'    <item id="{fid}" href="chapters/{fid}.xhtml" media-type="application/xhtml+xml"/>'
@@ -251,19 +255,21 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
         zf.writestr("META-INF/container.xml", _CONTAINER_XML)
         zf.writestr("OEBPS/content.opf", opf)
         zf.writestr("OEBPS/toc.ncx", ncx)
-        if has_font:
-            css = _CSS_FONT.replace('__FEXT__', font_ext).replace('__FFMT__', font_format)
-        else:
-            css = _CSS_PLAIN
-        zf.writestr("OEBPS/css/style.css", css)
-        if has_font:
-            zf.writestr(f"OEBPS/font.{font_ext}", font_bytes)
+        zf.writestr("OEBPS/css/style.css", _CSS_FONT if has_font else _CSS_PLAIN)
+        for i, (fttf, fext, fmime, _) in enumerate(fonts):
+            zf.writestr(f"OEBPS/font{i}.{fext}", fttf)
 
         for fname, data in image_files.items():
             zf.writestr(f"OEBPS/images/{fname}", data)
 
-        for i, (ch_title, body) in enumerate(chapters):
-            xhtml = _CHAPTER_XHTML.format(title=ch_title, body=body)
+        for i, (ch_title, body, fidx) in enumerate(chapters):
+            if fidx is not None:
+                _, fext, _, fformat = fonts[fidx]
+                fontstyle = (f'<style>@font-face{{font-family:\'NovelFont\';'
+                             f'src:url(\'../font{fidx}.{fext}\') format(\'{fformat}\');}}</style>')
+            else:
+                fontstyle = ''
+            xhtml = _CHAPTER_XHTML.format(title=ch_title, fontstyle=fontstyle, body=body)
             zf.writestr(f"OEBPS/chapters/ch{i:04d}.xhtml", xhtml)
 
     size_mb = output_path.stat().st_size / (1024 * 1024)
