@@ -45,6 +45,7 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "Title" --author "A
 | [esjzone.one](https://www.esjzone.one) | CDP (Edge browser) + login | — | — | esj.username/password + Edge |
 | [masiro.me](https://masiro.me) 真白萌 | CDP (Edge browser) + login | — | — | masiro.username/password + Edge |
 | [wenku8.net](https://www.wenku8.net) | HTTP (GBK HTML) | — | ✅ | — |
+| [ixinzhi 轻小说文库库](https://github.com/ixinzhi) | GitHub direct EPUB download | finished | varies | — |
 | [syosetu.org](https://syosetu.org) | CDP (Edge browser) | — | ✅ | Edge browser |
 | Local TXT | stdlib | — | — | — |
 
@@ -103,6 +104,11 @@ python ebook.py syosetu -u "https://syosetu.org/novel/<ID>/" --html <OUT_DIR>
 # wenku8.net
 python ebook.py wenku8 "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm"
 
+# 轻小说文库 ready-made EPUBs (ixinzhi GitHub direct links, no scraping)
+python ebook.py ixzbhi "86-不存在的战区"            # search + download best match
+python ebook.py ixzbhi "书名" --list                 # list matches only
+python ebook.py ixzbhi "书名" --offline              # use cached index
+
 # novelia.cc
 python ebook.py novelia "https://n.novelia.cc/novel/<SOURCE>/<ID>" -o <OUTPUT>.txt
 
@@ -127,6 +133,12 @@ python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"
 
 # TXT → EPUB
 python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "Title" --author "Author"
+
+# Already-typeset TXT → EPUB (layout-preserving: one paragraph per line / blank line =
+# scene break, no merge or noise-clean; optional OpenCC simplified/traditional)
+python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --preserve-layout \
+    --convert t2s --cover cover.jpg --images-dir <IMAGE_DIR>
+# --convert t2s|s2t local OpenCC; --chapter-regex R custom chapter-title regex
 
 # HTML dir → font-embedded EPUB
 python ebook.py pack <BOOK_DIR> --author "Author"
@@ -199,10 +211,12 @@ lightnovel.app delivers chapter text with characters mapped to **Unicode PUA** (
 |--------|---------|
 | `ebook.py` | Unified CLI entry point |
 | `scripts/convert.py` | TXT → EPUB (encoding detection, chapter parsing, noise removal) |
+| `scripts/pack_preserve.py` | Typeset TXT → EPUB (layout-preserving; optional OpenCC, cover, illustrations) |
 | `scripts/lightnovel_api.py` | lightnovel.app API fetcher (pure-Python LongPolling; +download/convert) |
 | `scripts/lightnovel_client.py` | lightnovel.app SignalR LongPolling client (msgpack + REST download) |
 | `scripts/syosetu_fetch.py` | syosetu.org CDP fetcher (Cloudflare bypass) |
 | `scripts/wenku8_fetch.py` | wenku8.net CDP fetcher |
+| `scripts/ixzbhi_fetch.py` | 轻小说文库 ready-made EPUB direct download (ixinzhi GitHub; cached index + fuzzy search) |
 | `scripts/web_fetch.py` | novelia.cc REST API fetcher |
 | `scripts/html2epub_font.py` | HTML directory → font-embedded EPUB (WOFF2→TTF) |
 | `scripts/lightnovel_decode.py` | Offline font decoder for snapshots |
@@ -213,7 +227,7 @@ lightnovel.app delivers chapter text with characters mapped to **Unicode PUA** (
 ## Dependencies
 
 ```
-requests  websocket-client  fonttools  brotli  curl_cffi  Pillow
+requests  websocket-client  fonttools  brotli  curl_cffi  Pillow  opencc-python-reimplemented
 ```
 
 All installable via `pip install -r requirements.txt`.  

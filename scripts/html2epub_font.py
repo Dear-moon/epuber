@@ -10,11 +10,11 @@ Usage:
       -o "SAO_Progressive_009.epub" --author "川原礫"
 """
 
-import sys, re, json, base64, argparse, zipfile, io
+import sys, re, json, base64, argparse, zipfile, io, hashlib
 from pathlib import Path
 
 
-def _woff2_to_ttf(woff2_bytes):
+def _woff2_to_ttf(woff2_bytes, family_name):
     """Convert WOFF2 font to TTF/OTF using fontTools. Returns (bytes, extension, mimetype)."""
     try:
         from fontTools.ttLib import TTFont
@@ -25,6 +25,20 @@ def _woff2_to_ttf(woff2_bytes):
     buf = io.BytesIO(woff2_bytes)
     font = TTFont(buf)
     font.flavor = None  # Remove WOFF2 wrapper
+    if 'name' in font:
+        names = {
+            1: family_name,
+            2: 'Regular',
+            3: f'{family_name};Regular',
+            4: f'{family_name} Regular',
+            6: f'{family_name}-Regular',
+            16: family_name,
+            17: 'Regular',
+        }
+        # Mobile font engines may cache faces by their internal family name.
+        for platform_id, encoding_id, language_id in ((3, 1, 0x409), (1, 0, 0)):
+            for name_id, value in names.items():
+                font['name'].setName(value, name_id, platform_id, encoding_id, language_id)
     out = io.BytesIO()
     font.save(out)
     font.close()
@@ -56,12 +70,18 @@ _MIME_MAP = {
     'bmp': 'image/bmp',
 }
 
-# Shared LAYOUT (style.css) — no @font-face, no hard-coded font family. Each obfuscation
-# font gets its own linked css/font{i}.css (@font-face + body{font-family:'NovelFont'})
-# so chapters select their font purely via a LINKED stylesheet — mobile readers (Moon+)
-# honor linked-CSS @font-face but may ignore inline <style>/inline body font-family,
-# so we avoid both. This mirrors the mechanism that already rendered correctly on-device.
-_CSS_FONT = """body {
+_CSS_FONT = """@font-face {
+  font-family: '__FONT_FAMILY__';
+  src: url('../__FONT_FILE__') format('__FFMT__');
+  font-style: normal;
+  font-weight: 400;
+}
+.__SCOPE_CLASS__ {
+  font-family: '__FONT_FAMILY__', serif;
+}
+"""
+
+_CSS_BASE = """body {
   max-width: 800px;
   margin: 0 auto;
   padding: 1.5em 1em;
@@ -78,29 +98,9 @@ img { max-width: 100%; height: auto; }
 .cover { text-align: center; text-indent: 0; }
 """
 
-# A per-font stylesheet. Each font gets a UNIQUE family name (NovelFont{i}) — readers
-# resolve @font-face by family name GLOBALLY across the whole book's css, so a shared
-# 'NovelFont' name across multiple font css files would collide and clamp every chapter
-# to the first-loaded font. Unique names keep each chapter bound to its own font.
-def _font_css(fidx, fext, fformat):
-    fam = f"NovelFont{fidx}"
-    return (f"@font-face{{font-family:'{fam}';src:url('../font{fidx}.{fext}') format('{fformat}');}}\n"
-            f"body {{ font-family: '{fam}', serif; }}\n")
-
-_CSS_PLAIN = """body {
+_CSS_PLAIN = """.chapter-plain {
   font-family: "Microsoft YaHei", "SimSun", "Noto Serif CJK SC", "Yu Mincho", serif;
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 1.5em 1em;
-  line-height: 1.9;
-  font-size: 18px;
 }
-p { margin: 0.5em 0; text-indent: 1em; }
-h1 { text-align: center; font-size: 1.4em; text-indent: 0; }
-.biaoti1 { font-size: 1.4em; font-weight: bold; text-align: center; margin: 1em 0; text-indent: 0; }
-.biaoti2 { text-align: center; margin: 0.5em 0; font-size: 0.95em; text-indent: 0; }
-.empty-line { height: 1em; text-indent: 0; }
-img { max-width: 100%; height: auto; display: block; margin: 1em auto; }
 """
 
 _CHAPTER_XHTML = """<?xml version="1.0" encoding="utf-8"?>
@@ -110,10 +110,11 @@ _CHAPTER_XHTML = """<?xml version="1.0" encoding="utf-8"?>
   <meta charset="utf-8"/>
   <title>{title}</title>
   <link rel="stylesheet" type="text/css" href="../css/style.css"/>
-  {fontcss}
 </head>
 <body>
+<div class="{body_class}">
 {body}
+</div>
 </body>
 </html>
 """
@@ -191,33 +192,50 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
 
     print(f"Found {len(html_files)} HTML files, {len(image_files)} images", file=sys.stderr)
 
-    # Read all chapters. The obfuscation font differs per chapter (per-fetch
-    # randomized), so we keep each chapter's OWN font instead of collapsing to one.
-    chapters = []          # (ch_title, body, font_index_or_None)
-    fonts = []             # list of (ttf_bytes, ext, mime, font_format)
-    font_seen = {}         # md5(base64 font) -> index in fonts
+    # Read all chapters
+    chapters = []
+    font_assets = []
+    fonts_by_digest = {}
     for p in html_files:
         text = p.read_text(encoding='utf-8')
         fb, body = _extract_font_and_body(text)
-        ch_title = p.stem
-        body = re.sub(r'src="images/', 'src="../images/', body)
-        fidx = None
+        font_asset = None
         if fb is not None:
-            key = hash(fb)
-            if key in font_seen:
-                fidx = font_seen[key]
-            else:
-                fidx = len(fonts)
-                font_seen[key] = fidx
-                ttf, fext, fmime = _woff2_to_ttf(fb)
-                fformat = 'truetype' if fext == 'ttf' else 'opentype'
-                fonts.append((ttf, fext, fmime, fformat))
-                print(f"  Font #{fidx} converted: WOFF2 → {fext.upper()} ({len(ttf):,} bytes)", file=sys.stderr)
-        chapters.append((ch_title, body, fidx))
-        print(f"  {p.name}: {len(body)} chars body", file=sys.stderr)
+            digest = hashlib.sha256(fb).hexdigest()
+            font_asset = fonts_by_digest.get(digest)
+            if font_asset is None:
+                font_key = digest[:16]
+                family_name = f"NovelFont-{font_key}"
+                data, ext, mime = _woff2_to_ttf(fb, family_name)
+                font_id = f"font-{font_key}"
+                font_format = {
+                    'ttf': 'truetype',
+                    'otf': 'opentype',
+                    'woff2': 'woff2',
+                }.get(ext, ext)
+                font_asset = {
+                    'id': font_id,
+                    'filename': f"{font_id}.{ext}",
+                    'data': data,
+                    'mime': mime,
+                    'format': font_format,
+                    'family': family_name,
+                    'scope': f"chapter-font-{font_key}",
+                }
+                fonts_by_digest[digest] = font_asset
+                font_assets.append(font_asset)
+                print(
+                    f"  Font {font_id}: WOFF2 → {ext.upper()} ({len(data):,} bytes)",
+                    file=sys.stderr,
+                )
+        ch_title = p.stem
+        # Rewrite image src from images/xxx.jpg to ../images/xxx.jpg (EPUB path)
+        body = re.sub(r'src="images/', 'src="../images/', body)
+        chapters.append((ch_title, body, font_asset))
+        font_label = font_asset['id'] if font_asset else 'none'
+        print(f"  {p.name}: {len(body)} chars body, font={font_label}", file=sys.stderr)
 
-    has_font = len(fonts) > 0
-    if not has_font:
+    if not font_assets:
         print("  No embedded font found, using standard CSS", file=sys.stderr)
 
     uid = f"lightnovel-{hash(title)}-{len(chapters)}"
@@ -229,9 +247,11 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
 
     # CSS + fonts + NCX
     manifest_items.append('<item id="css" href="css/style.css" media-type="text/css"/>')
-    for i, (fttf, fext, fmime, _) in enumerate(fonts):
-        manifest_items.append(f'<item id="font{i}" href="font{i}.{fext}" media-type="{fmime}"/>')
-        manifest_items.append(f'<item id="fcs{i}" href="css/font{i}.css" media-type="text/css"/>')
+    for font_asset in font_assets:
+        manifest_items.append(
+            f'<item id="{font_asset["id"]}" href="{font_asset["filename"]}" '
+            f'media-type="{font_asset["mime"]}"/>'
+        )
     manifest_items.append('<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>')
 
     # Images
@@ -247,7 +267,7 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
         )
 
     # Chapters
-    for i, (ch_title, body, _fidx) in enumerate(chapters):
+    for i, (ch_title, body, font_asset) in enumerate(chapters):
         fid = f"ch{i:04d}"
         manifest_items.append(
             f'    <item id="{fid}" href="chapters/{fid}.xhtml" media-type="application/xhtml+xml"/>'
@@ -266,19 +286,31 @@ def build_epub(html_dir: str, output: str, title: str, author: str):
         zf.writestr("META-INF/container.xml", _CONTAINER_XML)
         zf.writestr("OEBPS/content.opf", opf)
         zf.writestr("OEBPS/toc.ncx", ncx)
-        zf.writestr("OEBPS/css/style.css", _CSS_FONT if has_font else _CSS_PLAIN)
-        for i, (fttf, fext, fmime, fformat) in enumerate(fonts):
-            zf.writestr(f"OEBPS/font{i}.{fext}", fttf)
-            # Per-font linked stylesheet: @font-face + body font-family (both in a
-            # LINKED css so mobile readers honor them; no inline styles needed).
-            zf.writestr(f"OEBPS/css/font{i}.css", _font_css(i, fext, fformat))
+        font_css = []
+        for font_asset in font_assets:
+            font_css.append(
+                _CSS_FONT
+                .replace('__FONT_FAMILY__', font_asset['family'])
+                .replace('__FONT_FILE__', font_asset['filename'])
+                .replace('__FFMT__', font_asset['format'])
+                .replace('__SCOPE_CLASS__', font_asset['scope'])
+            )
+        zf.writestr(
+            "OEBPS/css/style.css",
+            "\n\n".join([_CSS_BASE, _CSS_PLAIN, *font_css]),
+        )
+        for font_asset in font_assets:
+            zf.writestr(f"OEBPS/{font_asset['filename']}", font_asset['data'])
 
         for fname, data in image_files.items():
             zf.writestr(f"OEBPS/images/{fname}", data)
 
-        for i, (ch_title, body, fidx) in enumerate(chapters):
-            fontcss = f'  <link rel="stylesheet" type="text/css" href="../css/font{fidx}.css"/>' if fidx is not None else ''
-            xhtml = _CHAPTER_XHTML.format(title=ch_title, fontcss=fontcss, body=body)
+        for i, (ch_title, body, font_asset) in enumerate(chapters):
+            xhtml = _CHAPTER_XHTML.format(
+                title=ch_title,
+                body=body,
+                body_class=font_asset['scope'] if font_asset else 'chapter-plain',
+            )
             zf.writestr(f"OEBPS/chapters/ch{i:04d}.xhtml", xhtml)
 
     size_mb = output_path.stat().st_size / (1024 * 1024)

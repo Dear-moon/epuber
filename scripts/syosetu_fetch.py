@@ -665,6 +665,13 @@ def main():
     # Mark all fetched chapters
     for i in range(args.start, total + 1):
         _mark_chapter(novel_id, i, novel_title)
+    # 时间轴抓取记录
+    try:
+        from fetch_history import record as _rec
+        _rec('syosetu', novel_title, novel_id, total - args.start + 1, 'chapters',
+             args.html or args.output, 'web')
+    except Exception:
+        pass
     ws.close()
 
 

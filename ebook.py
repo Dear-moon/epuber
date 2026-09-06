@@ -465,9 +465,17 @@ def cmd_wenku8(args):
     # Memory is recorded by wenku8_fetch.py itself
 
 
+def cmd_ixzbhi(args):
+    """下载轻小说文库现成 EPUB（ixinzhi GitHub 仓库）"""
+    _run('ixzbhi_fetch.py', *args)
+
+
 def cmd_convert(args):
-    """TXT → EPUB"""
-    _run('convert.py', *args)
+    """TXT → EPUB. --preserve-layout/--convert route to the layout-preserving packer."""
+    if '--preserve-layout' in args or any(a in ('--convert', '--chapter-regex', '--cover', '--images-dir') for a in args):
+        _run('pack_preserve.py', *[a for a in args if a != '--preserve-layout'])
+    else:
+        _run('convert.py', *args)
 
 
 def cmd_pack(args):
@@ -511,7 +519,12 @@ def print_help():
     print("  masiro         真白萌 (masiro.me) 抓取, 需 masiro 账号")
     print("  refresh-token  自动获取 lightnovel.app RefreshToken (浏览器 IndexedDB)")
     print("  wenku8         wenku8.net CDP 抓取")
+    print("  ixzbhi         下载轻小说文库现成 EPUB (ixinzhi GitHub 仓库, 按书名搜直链)")
     print("  convert        TXT → EPUB")
+    print("                 --preserve-layout 保排版（每段一行/空行=场景间隔），转保排版脚本")
+    print("                 --convert t2s|s2t 本地 OpenCC 简繁（走保排版路径）")
+    print("                 --chapter-regex R 保排版时的章节标题正则")
+    print("                 --cover IMG --images-dir DIR 保排版插图/封面")
     print("  pack           HTML 目录 → 字体嵌入 EPUB")
     print("  decode         字体解码 (离线快照)")
     print("  ocr            [实验] VLM OCR 字形映射表")
@@ -534,6 +547,7 @@ COMMANDS = {
     'syosetu': cmd_syosetu,
     'novelia': cmd_novelia,
     'wenku8': cmd_wenku8,
+    'ixzbhi': cmd_ixzbhi,
     'wenku': cmd_wenku,
     'lk': cmd_lk,
     'esj': cmd_esj,

@@ -45,6 +45,7 @@ python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "书名" --author "
 | [esjzone.one](https://www.esjzone.one) | CDP（Edge 浏览器）+ 登录 | — | — | esj.username/password + Edge |
 | [masiro.me](https://masiro.me) 真白萌 | CDP（Edge 浏览器）+ 登录 | — | — | masiro.username/password + Edge |
 | [wenku8.net](https://www.wenku8.net) | HTTP（GBK HTML） | — | ✅ | — |
+| [ixinzhi 轻小说文库库](https://github.com/ixinzhi) | GitHub 直链下载成品 EPUB | 成品 | 随书 | — |
 | [syosetu.org](https://syosetu.org) | CDP（Edge 浏览器） | — | ✅ | Edge 浏览器 |
 | 本地 TXT | stdlib | — | — | — |
 
@@ -103,6 +104,11 @@ python ebook.py syosetu -u "https://syosetu.org/novel/<ID>/" --html <OUT_DIR>
 # wenku8.net
 python ebook.py wenku8 "https://www.wenku8.net/novel/<CAT>/<ID>/index.htm"
 
+# 轻小说文库现成 EPUB（ixinzhi GitHub 直链，成品下载，无需抓正文）
+python ebook.py ixzbhi "86-不存在的战区"            # 搜 + 下载最佳匹配
+python ebook.py ixzbhi "书名" --list                 # 只列匹配不下载
+python ebook.py ixzbhi "书名" --offline              # 用本地缓存索引
+
 # novelia.cc
 python ebook.py novelia "https://n.novelia.cc/novel/<SOURCE>/<ID>" -o <OUTPUT>.txt
 
@@ -127,6 +133,11 @@ python ebook.py masiro "https://masiro.me/admin/novelView?novel_id=<MSID>"
 
 # TXT → EPUB
 python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --title "书名" --author "作者"
+
+# 已排版 TXT → EPUB（保排版：每段一行/空行=场景间隔，不合并不清洗；可选 OpenCC 简繁）
+python ebook.py convert <INPUT>.txt -o <OUTPUT>.epub --preserve-layout \
+    --convert t2s --cover cover.jpg --images-dir <IMAGE_DIR>
+# --convert t2s|s2t 本地 OpenCC 简繁；--chapter-regex R 自定义章节标题正则
 
 # HTML 目录 → 字体嵌入 EPUB
 python ebook.py pack <BOOK_DIR> --author "作者名"
@@ -199,10 +210,12 @@ lightnovel.app 将章节文字映射到 **Unicode PUA 私用区**（U+E000–F8F
 |------|------|
 | `ebook.py` | 统一 CLI 入口 |
 | `scripts/convert.py` | TXT → EPUB（编码检测、章节识别、噪音清洗） |
+| `scripts/pack_preserve.py` | 已排版 TXT → EPUB（保排版：每段一行/空行=场景间隔；可选 OpenCC 简繁、封面、插图） |
 | `scripts/lightnovel_api.py` | lightnovel.app API 抓取（纯 Python LongPolling；含整本下载/简繁转换） |
 | `scripts/lightnovel_client.py` | lightnovel.app SignalR LongPolling 客户端（msgpack + REST 下载） |
 | `scripts/syosetu_fetch.py` | syosetu.org CDP 抓取（Cloudflare 穿透） |
 | `scripts/wenku8_fetch.py` | wenku8.net CDP 抓取 |
+| `scripts/ixzbhi_fetch.py` | 轻小说文库现成 EPUB 直链下载（ixinzhi GitHub，索引缓存 + 模糊搜索） |
 | `scripts/web_fetch.py` | novelia.cc REST API 抓取 |
 | `scripts/html2epub_font.py` | HTML 目录 → 字体嵌入 EPUB（WOFF2→TTF） |
 | `scripts/lightnovel_decode.py` | 离线字体解码（快照用） |
@@ -213,7 +226,7 @@ lightnovel.app 将章节文字映射到 **Unicode PUA 私用区**（U+E000–F8F
 ## 依赖
 
 ```
-requests  websocket-client  fonttools  brotli  curl_cffi  Pillow
+requests  websocket-client  fonttools  brotli  curl_cffi  Pillow  opencc-python-reimplemented
 ```
 
 全部可通过 `pip install -r requirements.txt` 安装。  

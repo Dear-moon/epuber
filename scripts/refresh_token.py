@@ -41,8 +41,12 @@ except ImportError:
     def get(key, default=None):
         return default
 
-# 复用 wenku8_fetch 的通用 CDP 骨架
-from wenku8_fetch import wait_for_page, ws_connect, cdp_eval
+# 复用 wenku8_fetch 的通用 CDP 骨架（wenku8_fetch 已改纯 HTTP，CDP 助手可能不存在；
+# 主路径为磁盘读，CDP 仅浏览器回退时用，故惰性引入、缺省降级为 None）。
+try:
+    from wenku8_fetch import wait_for_page, ws_connect, cdp_eval
+except ImportError:
+    wait_for_page = ws_connect = cdp_eval = None
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = SKILL_ROOT / 'config.json'
