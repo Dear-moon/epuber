@@ -39,7 +39,7 @@ except ImportError:
     def get(key, default=None):
         return default
 
-# 复用 wenku8_fetch.py 的通用 CDP 骨架（Edge 启动/穿透/提取）
+# Reuse the generic CDP helpers from wenku8_fetch.py (Edge launch/bypass/extract)
 from wenku8_fetch import (kill_edge, launch_edge, is_cdp_alive, find_tab,
                           wait_for_page, ws_connect, cdp_eval, page_navigate)
 
@@ -136,19 +136,19 @@ def fetch_book(book_id, board=None, visible=False):
 
         page_text = _read_rendered(ws)
 
-        # 书名/作者：页面顶层文本 "书名 作者: xxx"
+        # Title/author: top-of-page text "书名 作者: xxx"
         title = ''
         author = ''
         m = re.search(r'^.*?([^\n]{2,60})', page_text)
-        # 更稳：从 body 前两行找书名与作者 "作者: xxx"
+        # More robust: read title/author from the first body lines "作者: xxx"
         am = re.search(r'作者[:：]\s*([^\n]+)', page_text)
         if am:
             author = am.group(1).strip()
-        # 书名取页面 <title> 或首行
+        # Title from page <title> or first line
         tm = cdp_eval(ws, '(document.title||"").split(" - ")[0].trim()')
         title = tm or (m.group(1).strip() if m else f'esj{book_id}')
 
-        # 章节链接：渲染后 DOM 提取
+        # Chapter links: extract from the rendered DOM
         links = _extract_novel_links(ws)
         chapters = []
         for each in links:
@@ -160,13 +160,13 @@ def fetch_book(book_id, board=None, visible=False):
                 continue   # 排除书籍页本身
             page_id = mm.group(1)
             full = u if u.startswith('http') else f'https://www.esjzone.one{u}'
-            # 进正文
+            # Enter the content page
             page_navigate(ws, full)
             time.sleep(2)
             body = _read_rendered(ws)
             if len(body.strip()) < 10:
                 continue
-            # 密码/付费章节标记
+            # Password/paid-chapter marker
             if any(k in body for k in ['btn-send-pw', '內文目前施工中', '登录后查看', '付费', '購買']):
                 print(f'  跳过(密码/付费): {each["title"][:40]}', flush=True)
                 continue
@@ -175,7 +175,7 @@ def fetch_book(book_id, board=None, visible=False):
             time.sleep(0.5)
 
         if not chapters:
-            # esjzone 改版后正文需登录可见（Discuz 帖内楼层）
+            # esjzone now requires login for content (Discuz forum threads)
             err = ('未抓到任何正文章节：esjzone 改版后正文需登录。\n'
                    '请在 config.json 配置 esj.username / esj.password（或 esj.cookie）。')
             raise RuntimeError(err)

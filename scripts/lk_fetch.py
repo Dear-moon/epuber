@@ -174,15 +174,15 @@ def parse_url(url):
 def bbcode_to_text(text, detail):
     """清洗轻国 BBCode 正文 → 纯文本。插图(res/attach/img)丢弃。"""
     result = text or ''
-    # [res]key[/res] → 插图，丢弃
+    # [res]key[/res]: illustration, drop
     if detail and detail.get('res') and detail['res'].get('res_info'):
         result = re.sub(r'\[res\].*?\[/res\]', '', result)
-    # [attach]key[/attach] → 插图，丢弃
+    # [attach]key[/attach]: illustration, drop
     if detail and detail.get('attaches') and detail['attaches'].get('res_info'):
         result = re.sub(r'\[attach\].*?\[/attach\]', '', result)
-    # [img]url[/img] → 插图，丢弃
+    # [img]url[/img]: illustration, drop
     result = re.sub(r'\[img\].*?\[/img\]', '', result)
-    # 其余 bbcode 标签全部移除
+    # Strip all remaining bbcode tags
     result = re.sub(r'\[.*?\]', '', result)
     return result
 
@@ -199,7 +199,7 @@ def fetch_book(book_id):
     title = author = ''
     chapters = []
 
-    # ---- 先试单本 ----
+    # ---- Try single-volume first ----
     detail = client.get_detail(book_id)
     dd = detail.get('data') or {}
     if detail.get('code') == 0 and dd.get('content'):
@@ -212,7 +212,7 @@ def fetch_book(book_id):
         print(f'  单本: {title}  | 1 篇 ({len(content)} 字)', flush=True)
         return title, author, chapters
 
-    # ---- 否则按合集处理 ----
+    # ---- Otherwise handle as a collection ----
     info = client.get_series(book_id)
     title = info.get('name', '')
     author = info.get('author', '') or info.get('creator') or ''
@@ -290,7 +290,7 @@ Examples:
     if not author:
         author = ''
 
-    # 组装 TXT
+    # Assemble TXT
     parts = [f'# {title}']
     if author:
         parts.append(f'作者: {author}')
@@ -303,7 +303,7 @@ Examples:
     text = '\n'.join(parts)
     print(f'\n总字数: {len(text):,}')
 
-    # 输出：默认自动转 EPUB 到 ebook 根；-o 指定 .txt 则输出纯文本
+    # Output: auto-convert to EPUB under ebook root by default; -o .txt for plain text
     fetch_dir = get_fetch_dir()
     ebook_root = fetch_dir.parent if fetch_dir.name == 'fetch' else fetch_dir
     safe = re.sub(r'[<>:"/\\|?*]', '_', title)[:80]
@@ -323,7 +323,7 @@ Examples:
         except Exception:
             pass
 
-    # 记忆 + 时间轴记录
+    # Memory + fetch-timeline record
     _mark_lk(book_id, title, len([c for c in chapters if c[0] != 0]))
     try:
         from fetch_history import record as _rec

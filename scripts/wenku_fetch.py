@@ -35,7 +35,7 @@ if sys.platform == 'win32':
     except Exception:
         pass
 
-# --- 配置 & 记忆（与 web_fetch.py 同款模式） ---
+# --- Config & memory (same pattern as web_fetch.py) ---
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from config import get_fetch_dir
@@ -83,8 +83,8 @@ except ImportError:
 
 NOVELIA_API = 'https://n.novelia.cc/api'
 
-# mode: zh=只要中文 / zh-jp=中文为主+日文 / jp-zh=日文为主+中文
-# 注意: 纯日文 mode=jp 不被 file 端点支持（404/400），故不列入。
+# mode: zh=Chinese only / zh-jp=Chinese-primary+JP / jp-zh=JP-primary+Chinese
+# Note: pure-JP mode=jp is unsupported by the file endpoint (404/400), so omitted.
 MODES = ['zh', 'zh-jp', 'jp-zh']
 TRANSLATIONS = ['sakura', 'gpt', 'youdao']
 
@@ -129,7 +129,7 @@ def fetch_metadata(wid, session):
                 raise RuntimeError(f"Wenku API returned {resp.status_code} for {url}")
             data = resp.json()
             if not isinstance(data, dict) or 'titleZh' not in data:
-                # 结构异常，重试一次
+                # Unexpected structure; retry once
                 if attempt == 3:
                     raise RuntimeError(f"Wenku metadata returned unexpected structure for {url}")
                 time.sleep(1.0)
@@ -153,7 +153,7 @@ def fetch_metadata(wid, session):
         'level': data.get('level', ''),
         'introduction': data.get('introduction', ''),
         'web_ids': data.get('webIds', []),
-        # 卷列表: volumeJp 优先（总能下载），volumeZh 兜底
+        # Volume list: volumeJp first (always downloadable), volumeZh as fallback
         'volume_list': data.get('volumeJp', []) or data.get('volumeZh', []),
         'volumes_meta': data.get('volumes', []),  # asin/title/publishAt/cover
     }
@@ -176,7 +176,7 @@ def _build_volumes(meta):
     Returns list of dicts: {index, title, volume_id, publish_at, asin, counts}
     """
     def _norm(s):
-        # NFKC 归一化（全角/半角、组合读音假名）+ 折叠各种空白/分隔符
+        # NFKC normalise (full/half-width, kana) + collapse whitespace/separators
         s2 = unicodedata.normalize('NFKC', s or '').lower()
         s2 = re.sub(r'\[[^\]]*\]', '', s2)                      # [作者] 前缀
         s2 = re.sub(r'^[^一-龥ぁ-んァ-ヶa-z0-9]+', '', s2)      # 行首非内容前导
@@ -202,10 +202,10 @@ def _build_volumes(meta):
     def _series(s):
         """去掉卷号后的全集系列名（如 'アサシンズプライド'、'Secret Garden'）。"""
         base, num = _num_key(s)
-        # 若带数字系列名，数字后一般是副标题 → 主标题已由 _num_key 截好
+        # If the series has a number, the subtitle follows it; main title ends at _num_key
         return base
 
-    # 以 volumeJp（volume_list）为主序，逐卷从 volumes_meta 反查 publish_at/asin
+    # Order by volumeJp (volume_list); look up publish_at/asin per volume in volumes_meta
     vol_by_exact = {}
     vol_by_num = {}
     for v in meta['volume_list']:
@@ -216,7 +216,7 @@ def _build_volumes(meta):
         if key[1] is not None:
             vol_by_num.setdefault(key, v)
 
-    # volumes_meta 索引：精确 → 数字 → 无卷号系列名
+    # volumes_meta lookup: exact -> number -> series with no volume no.
     meta_by_exact = {}
     meta_by_num = {}
     meta_by_series = {}
@@ -236,7 +236,7 @@ def _build_volumes(meta):
         base = vid[:-5] if vid.endswith('.epub') else vid
         counts = {k: v.get(k) for k in TRANSLATIONS}
 
-        # 反查 volumes_meta
+        # Reverse-look up volumes_meta
         vm = None
         nkey = _num_key(base)
         if nkey[1] is not None:
@@ -246,7 +246,7 @@ def _build_volumes(meta):
         if vm is None:
             vm = meta_by_series.get(_series(base))   # volumeJp 无数字值兜底（如 'Secret Garden'）
         if vm is None:
-            # 前缀兜底：volumeJp 的系列名是某条未占用 volumes_meta 标题的前缀
+            # Prefix fallback: volumeJp series is a prefix of an unlinked volumes_meta title
             sbase = _series(base)
             if len(sbase) >= 6:
                 for ttt, mvm in meta_by_exact.items():
@@ -271,7 +271,7 @@ def _build_volumes(meta):
             'counts': counts,
         })
 
-    # 已按 publish_at 排序（无 publish_at 的卷不动，追加在后）
+    # Sorted by publish_at (volumes without it stay put, appended at the end)
     ordered.sort(key=lambda x: (x['publish_at'] is None, x['publish_at'] or 0))
 
     for i, vol in enumerate(ordered, 1):
@@ -285,7 +285,7 @@ def download_volume(wid, volume_id, out_path, mode, translations, translations_m
 
     Returns (ok: bool, msg: str).
     """
-    # filename 参数按前端格式: {mode}.{Y|B}{翻译首字母}.{volumeId}
+    # filename per frontend format: {mode}.{Y|B}{translation-initial}.{volumeId}
     mark = 'B' if translations_mode == 'parallel' else 'Y'
     initials = ''.join(t[0] for t in translations)
     filename = f'{mode}.{mark}{initials}.{volume_id}'
@@ -513,7 +513,7 @@ Examples:
     _mark_wenku(wid, meta['title_zh'], len(volumes))
     print(f'\n  book_info.json saved. Total {len(volumes)} volume(s).')
 
-    # 时间轴抓取记录
+    # Fetch-timeline record
     try:
         from fetch_history import record as _rec
         _rec('wenku', meta['title_zh'], wid, len(volumes), 'volumes', str(out_dir), 'wenku')

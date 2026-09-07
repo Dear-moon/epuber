@@ -169,7 +169,7 @@ def cmd_memory(args):
                     if gaps:
                         print(f"Gaps: {', '.join(gaps[:10])}{'...' if len(gaps)>10 else ''}")
             else:
-                # web 版整体抓取: 记录章节总数
+                # Whole-web fetch: record the total chapter count
                 print(f"Web 版章节数: {entry.get('chapter_count', 0)}")
             print(f"Last fetch: {entry.get('last_fetch', '?')}")
         else:

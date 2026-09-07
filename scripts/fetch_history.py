@@ -68,7 +68,7 @@ def record(source, title, book_id, count, count_type, file=None, kind=''):
 
 
 if __name__ == '__main__':
-    # 手动测试: python fetch_history.py list
+    # Manual test: python fetch_history.py list
     import sys
     p = records_path()
     if len(sys.argv) > 1 and sys.argv[1] == 'list':

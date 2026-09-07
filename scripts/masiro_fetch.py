@@ -105,11 +105,11 @@ def _do_login(ws):
     password = get('masiro.password', '')
     if not username or not password:
         raise RuntimeError('真白萌需登录，请在 config.json 配置 masiro.username / masiro.password。')
-    # 取 csrf-token (_token) 输入值
+    # Read the csrf-token (_token) input value
     token = cdp_eval(ws, "(function(){let el=document.querySelector("
                          "'input[name=\"_token\"],input[name=\"csrf-token\"],input[type=\"hidden\"]');"
                          " return el?el.value:'';})()")
-    # 填入账号密码并提交
+    # Fill in credentials and submit
     js = ("(function(){"
           "function setVal(sel,v){let el=document.querySelector(sel);"
           " if(el){el.value=v; el.dispatchEvent(new Event('input',{bubbles:true}));}}"
@@ -120,7 +120,7 @@ def _do_login(ws):
     cdp_eval(ws, js)
     print('  已提交登录表单...', flush=True)
     time.sleep(4)
-    # 登录后再次导航到目标页
+    # Re-navigate to the target page after login
     return token
 
 
@@ -136,20 +136,20 @@ def fetch_book(novel_id, visible=False):
         ws = ws_connect(tab['webSocketDebuggerUrl'])
         time.sleep(2)
 
-        # 可能重定向到登录页
+        # May be redirected to the login page
         cur = cdp_eval(ws, 'location.href')
         if 'auth/login' in (cur or ''):
             _do_login(ws)
             page_navigate(ws, novel_url)
             time.sleep(4)
 
-        # 取书名/作者
+        # Read title/author
         title = _el_text(ws, '.novel-title') or _el_text(ws, 'h1')
         author = _el_text(ws, '.author a') or _el_text(ws, '.author')
         if not title:
             title = f'masiro{novel_id}'
 
-        # 目录：两个 script JSON
+        # TOC: two script JSON payloads
         chapters = []
         chap_json_raw = _read_script_json(ws, 'chapters-json')
         parent_raw = _read_script_json(ws, 'f-chapters-json')
@@ -165,7 +165,7 @@ def fetch_book(novel_id, visible=False):
             pass
 
         if not chap_list:
-            # 退化：直接读页面所有 novelReading 链接
+            # Fallback: read all novelReading links on the page
             print('  目录 JSON 为空，尝试从 DOM 提链接', flush=True)
             raw = cdp_eval(ws, '''
             (function(){
@@ -184,7 +184,7 @@ def fetch_book(novel_id, visible=False):
             for lk in links:
                 chapters.append((len(chapters) + 1, lk['title'], lk['cid']))
         else:
-            # 按 parent 层级组装（扁平化）
+            # Assemble by parent level (flatten)
             for ch in chap_list:
                 cid = str(ch.get('id', ''))
                 ch_title = ch.get('title', f'第{len(chapters)+1}节')
@@ -196,7 +196,7 @@ def fetch_book(novel_id, visible=False):
             raise RuntimeError('未提取到章节目录（可能登录失败或未授权）')
         print(f'  目录: {title}  | {len(chapters)} 章', flush=True)
 
-        # 逐章取正文
+        # Fetch content chapter by chapter
         content_map = []
         for idx, ch_title, cid in chapters:
             page_navigate(ws, f'https://masiro.me/admin/novelReading?cid={cid}')

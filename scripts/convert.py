@@ -122,7 +122,7 @@ def cn_to_int(s):
 
 # Chapter regex patterns — ordered by specificity (most specific first)
 CHAPTER_PATTERNS = [
-    # 第X卷 第Y章 Title (分卷+章, e.g. "第一卷 第一章 开园")
+    # 第X卷 第Y章 Title (volume+chapter; e.g. "第一卷 第一章 开园")
     (r'^第([一二三四五六七八九十百千]+)卷\s+第([一二三四五六七八九十百千]+)章\s*(.*)$', 'volume_chapter'),
     # 第X卷 终章/尾声/后记/特典/插图 (volume-level special)
     (r'^第([一二三四五六七八九十百千]+)卷\s+(终章|最終話|尾声|後記|后记|特典|番外|插图|插畫|あとがき)\s*(.*)$', 'volume_special'),

@@ -88,7 +88,7 @@ def _route_web_to_wenku(url, epub_path):
     if not src.exists():
         return str(src)
 
-    # 通过 API 检测该 web 小说是否有关联的文库版（wenkuId）
+    # Detect a bunko version (wenkuId) for this web novel via API
     api_wid = None
     try:
         r = create_session().get(f'{NOVELIA_API}/novel/{source}/{novel_id}', timeout=15)
@@ -97,7 +97,7 @@ def _route_web_to_wenku(url, epub_path):
     except Exception:
         api_wid = None
 
-    # syosetu/narou/hameln 互备源共享同一小说 id，允许跨源匹配
+    # syosetu/narou/hameln share one novel id, so cross-source matching is safe
     group = {'syosetu', 'narou', 'hameln'}
 
     for d in ebook_root.iterdir():
@@ -217,7 +217,7 @@ def cmd_lightnovel(args):
             clean.append(a)
         i += 1
 
-    # --pack-only: 已有抓取文件，直接压制 EPUB
+    # --pack-only: pack existing fetched files into EPUB
     if pack_only:
         bid = None
         for j, a in enumerate(clean):
@@ -234,7 +234,7 @@ def cmd_lightnovel(args):
         _record_lightnovel(bid, book_dir, out)
         return
 
-    # --all: 抓取全部章节，默认生成 HTML 并自动压制 EPUB
+    # --all: fetch all chapters, then auto HTML + pack EPUB
     if '--all' in clean:
         bid = None
         for j, a in enumerate(clean):
@@ -411,9 +411,9 @@ def cmd_novelia(args):
     if os.path.exists(epub_path):
         size_mb = os.path.getsize(epub_path) / (1024*1024)
         print(f"EPUB: {size_mb:.1f} MB → {epub_path}")
-        # 若该 web 小说对应某本地文库版目录，把 web 版挪进同一目录
+        # If a local bunko dir matches, move web files into it
         final_path = _route_web_to_wenku(url, epub_path) or epub_path
-        # 时间轴抓取记录
+        # Fetch-timeline record
         try:
             from fetch_history import record as _record
             from web_fetch import parse_url as _parse_url

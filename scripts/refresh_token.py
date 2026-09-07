@@ -41,8 +41,8 @@ except ImportError:
     def get(key, default=None):
         return default
 
-# 复用 wenku8_fetch 的通用 CDP 骨架（wenku8_fetch 已改纯 HTTP，CDP 助手可能不存在；
-# 主路径为磁盘读，CDP 仅浏览器回退时用，故惰性引入、缺省降级为 None）。
+# Reuse wenku8_fetch's CDP helpers (wenku8_fetch is now pure-HTTP; helpers may be gone)
+# load lazily and degrade to None -- disk read is primary, CDP is only a fallback.
 try:
     from wenku8_fetch import wait_for_page, ws_connect, cdp_eval
 except ImportError:
@@ -57,7 +57,7 @@ KEY = 'RefreshToken'
 ORIGIN_MARK = 'lightnovel'   # profile IndexedDB 目录名含此即视为登录过该站
 
 
-# ---- 浏览器可执行路径 ----
+# ---- Browser executable paths ----
 
 def _edge_exe():
     from config import get_edge_path
@@ -79,7 +79,7 @@ def _chrome_exe():
     return None
 
 
-# ---- 探测 profile ----
+# ---- Profile detection ----
 
 def _profile_roots():
     la = os.environ.get('LOCALAPPDATA', '')
@@ -125,12 +125,12 @@ def detect_profile(browser_pref=None, explicit_path=None):
     否则 Chromium 会把根子目录当新 user data，读到空 profile。
     """
     if explicit_path:
-        # 显式路径可能给到根或给到 profile 子目录；统一解析
+        # Path may be the root or a profile subdir; resolve both
         p = Path(explicit_path)
-        # 若 p 直接是含 IndexedDB 的 profile（其下 IndexedDB 有 lightnovel）
+        # If p is itself a profile holding the lightnovel IndexedDB
         if _has_lightnovel_indexeddb(p):
             return ('explicit', p.parent, p.name)
-        # 若 p 是 User Data 根，找其下含 lightnovel 的 profile 子目录
+        # If p is the User Data root, find a child profile with lightnovel
         for name in _list_profiles(p):
             prof_dir = p / name
             if _has_lightnovel_indexeddb(prof_dir):
@@ -152,7 +152,7 @@ def detect_profile(browser_pref=None, explicit_path=None):
         '或用 --profile <路径> 显式指定。')
 
 
-# ---- 磁盘读 IndexedDB（无浏览器）----
+# ---- Disk-read IndexedDB (browser-free) ----
 
 _ALNUM32 = re.compile(rb"[A-Za-z0-9]{32}")
 _HEX32 = re.compile(rb"[0-9a-f]{32}")
@@ -173,7 +173,8 @@ def _read_token_from_disk(profile_dir):
     if not idb_root.is_dir():
         return None
     for leveldb_dir in idb_root.glob("*lightnovel*.indexeddb.leveldb"):
-        for log_file in sorted(leveldb_dir.glob("*.log")):
+        # Chromium compacts the token into .ldb (SST); scanning .log alone misses it, so scan both.
+        for log_file in sorted(list(leveldb_dir.glob("*.log")) + list(leveldb_dir.glob("*.ldb"))):
             try:
                 data = log_file.read_bytes()
             except Exception:
@@ -186,7 +187,7 @@ def _read_token_from_disk(profile_dir):
     return None
 
 
-# ---- CDP 读 IndexedDB ----
+# ---- CDP read of IndexedDB ----
 
 def _read_indexeddb_token(ws):
     """在 lightnovel.app 页面上下文读 IndexedDB RefreshToken。
@@ -236,7 +237,7 @@ def _read_indexeddb_token(ws):
     return token
 
 
-# ---- 写回 config.json ----
+# ---- Write back to config.json ----
 
 def update_config(token):
     """把 token 写回 config.json 的 lightnovel.refresh_token，保留其它字段。"""
@@ -248,7 +249,7 @@ def update_config(token):
     return CONFIG_PATH
 
 
-# ---- 主流程 ----
+# ---- Main flow ----
 
 def _exe_for(browser, profile_path, port):
     if browser == 'edge':
@@ -284,7 +285,7 @@ def main():
     browser, user_data_root, profile_name = detect_profile(args.browser, args.profile)
     print(f'  命中: {browser} profile = {user_data_root}\\{profile_name}')
 
-    # 先试无浏览器直接读磁盘 leveldb（profile 被占用也能读）
+    # Try browser-free disk read first (works even if the profile is locked)
     disk_token = _read_token_from_disk(user_data_root / profile_name)
     if disk_token:
         if args.print:
@@ -295,7 +296,7 @@ def main():
             print(f'  lightnovel.refresh_token 已更新（磁盘读取，长度 {len(disk_token)}）')
         return 0
 
-    # 磁盘读不到（token 落在 .ldb 或未登录）→ 回退浏览器 CDP 法
+    # Disk read failed (token in .ldb or not logged in) -- fall back to browser CDP
     if not args.print:
         print('  磁盘未读到 token，回退浏览器 CDP 读取...', file=sys.stderr)
 
@@ -304,8 +305,8 @@ def main():
     proc = None
     ws = None
     try:
-        # 启动浏览器（复用 profile，本次实例）。关脚本时只关本进程，不 kill 用户浏览器。
-        # --user-data-dir 指向 User Data 根，profile 用 --profile-directory 指定。
+        # Launch browser reusing this profile; on exit only kill our process, never the user's.
+        # --user-data-dir points at the root; the profile is chosen via --profile-directory.
         args_launch = [
             exe,
             f'--user-data-dir={user_data_root}',
@@ -324,8 +325,8 @@ def main():
                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
         time.sleep(3)
 
-        # 等页面加载 + CDP 就绪（复用 wait_for_page，但 CDP_HTTP 固定 9222，这里需连 9229）
-        # 手动 wait
+        # Wait for page load + CDP (wait_for_page hardcodes 9222; this one needs 9229)
+        # Manual wait
         import urllib.request, json as _j
         start = time.time()
         tab = None
@@ -352,7 +353,7 @@ def main():
         time.sleep(2)  # 等 SPA 浅初始化
 
         print('读取 IndexedDB RefreshToken...')
-        # SPA 可能异步写入 token，轮询等待 store 出现字符串（最多 ~40s）
+        # The SPA may write the token async; poll until a string appears (~40s max)
         token = None
         last_err = None
         for attempt in range(20):
