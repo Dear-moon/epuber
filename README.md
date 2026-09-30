@@ -115,6 +115,8 @@ python ebook.py novelia "https://n.novelia.cc/novel/<SOURCE>/<ID>" -o <OUTPUT>.t
 # novelia bunko edition (published volumes, one dir per book)
 python ebook.py wenku "https://n.novelia.cc/wenku/<WID>" --list
 python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"
+python ebook.py wenku "https://n.novelia.cc/wenku/<WID>" --fix-volume-order  # name by real volume no.
+python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"
 
 # lightnovel.fun (轻之国度) — requires lk.username/password in config.json
 python ebook.py lk "https://www.lightnovel.fun/<LKID>"

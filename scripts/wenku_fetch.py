@@ -15,6 +15,7 @@ API 端点（已逆向验证）:
   python wenku_fetch.py "https://n.novelia.cc/wenku/<WID>"            # 下载全部卷
   python wenku_fetch.py "https://n.novelia.cc/wenku/<WID>" --list     # 只列卷
   python wenku_fetch.py "https://n.novelia.cc/wenku/<WID>" --volume 2 # 只下第2卷
+  python wenku_fetch.py "https://n.novelia.cc/wenku/<WID>" --fix-volume-order # 按标题真实卷号命名
 """
 
 import re
@@ -157,6 +158,40 @@ def fetch_metadata(wid, session):
         'volume_list': data.get('volumeJp', []) or data.get('volumeZh', []),
         'volumes_meta': data.get('volumes', []),  # asin/title/publishAt/cover
     }
+
+
+def _title_volume_no(title):
+    """Best-effort real volume number from a volume title; None if unclear.
+
+    Handles both '第08巻' and a bare trailing number ('...生きる10', '...転生婚 1～…').
+    """
+    s = unicodedata.normalize('NFKC', title or '')
+    s = re.sub(r'\[[^\]]*\]', '', s)
+    m = re.search(r'第\s*(\d+)\s*[巻卷]', s)
+    if m:
+        return int(m.group(1))
+    nums = re.findall(r'(?<!\d)(\d{1,3})(?!\d)', s)
+    return int(nums[-1]) if nums else None
+
+
+def _resolve_volume_numbers(volumes):
+    """Map listing position -> real volume number, or None when ambiguous.
+
+    Renaming is only safe on a clean 1..N permutation; anything less (duplicate or
+    out-of-range numbers) would collide or mislabel, so return None then. At most one
+    title may lack a number -- that is the series base title, given the missing volume.
+    """
+    n = len(volumes)
+    nums = [_title_volume_no(v['volume_id']) for v in volumes]
+    missing = [i for i, x in enumerate(nums) if x is None]
+    used = {x for x in nums if x is not None}
+    free = [k for k in range(1, n + 1) if k not in used]
+    # More than one number-less title means numbering is not trustworthy -- do not guess.
+    if len(missing) > 1 or len(free) != len(missing):
+        return None
+    for i, k in zip(missing, free):
+        nums[i] = k
+    return nums if sorted(nums) == list(range(1, n + 1)) else None
 
 
 def _build_volumes(meta):
@@ -368,6 +403,7 @@ Examples:
   python wenku_fetch.py https://n.novelia.cc/wenku/<WID> --list     # 只列卷不下
   python wenku_fetch.py https://n.novelia.cc/wenku/<WID> --volume 2 # 只下第2卷
   python wenku_fetch.py https://n.novelia.cc/wenku/<WID> --mode jp-zh -t sakura,gpt
+  python wenku_fetch.py https://n.novelia.cc/wenku/<WID> --fix-volume-order  # 按标题真实卷号命名
         ''')
     parser.add_argument('url', nargs='?', help='novelia wenku URL, e.g. https://n.novelia.cc/wenku/<WID>')
     parser.add_argument('--wid', help='wenku id directly (24-hex) if no URL given')
@@ -380,6 +416,9 @@ Examples:
     parser.add_argument('--translations-mode', default='priority', choices=['priority', 'parallel'],
                         help='priority = first available translation; parallel = interleave (default: priority)')
     parser.add_argument('--volume', type=int, help='Only download this volume number (1-based)')
+    parser.add_argument('--fix-volume-order', action='store_true',
+                        help='Name files by the real volume number parsed from each title, '
+                             'zero-padded (default: listing order)')
     parser.add_argument('--list', action='store_true', help='List volumes only, do not download')
     parser.add_argument('-w', '--workers', type=int, default=2,
                         help='Concurrent volume downloads (default: 2)')
@@ -456,8 +495,20 @@ Examples:
             sys.exit(1)
         targets = sel
 
+    # Filename number: listing position by default, real volume number with the flag.
+    # Zero-padded only under the flag so it sorts correctly and the default stays as-was.
+    vol_no = {v['index']: str(v['index']) for v in volumes}
+    if args.fix_volume_order:
+        nums = _resolve_volume_numbers(volumes)
+        if nums:
+            vol_no = {v['index']: f'{nums[i]:02d}' for i, v in enumerate(volumes)}
+            print('  Volume order from titles: ' +
+                  ', '.join(f'{v["index"]}->{vol_no[v["index"]]}' for v in volumes))
+        else:
+            print('  WARNING: titles do not give a clean 1..N order; keeping listing order')
+
     def _one(vol):
-        filename = f'第{vol["index"]}卷_{vol["volume_id"]}'
+        filename = f'第{vol_no[vol["index"]]}卷_{vol["volume_id"]}'
         out_path = out_dir / filename
         if out_path.exists() and not args.force:
             return vol, True, 'skipped (exists)', str(out_path)
@@ -503,7 +554,7 @@ Examples:
         'translations_mode': args.translations_mode,
         'fetched_at': time.strftime('%Y-%m-%d %H:%M'),
         'volumes': [{'index': v['index'], 'title': v['title'],
-                     'filename': f'第{v["index"]}卷_{v["volume_id"]}',
+                     'filename': f'第{vol_no[v["index"]]}卷_{v["volume_id"]}',
                      'publish_at': v['publish_at'], 'asin': v['asin']} for v in volumes],
         'web_version': None,
     }

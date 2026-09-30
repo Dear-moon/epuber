@@ -115,6 +115,7 @@ python ebook.py novelia "https://n.novelia.cc/novel/<SOURCE>/<ID>" -o <OUTPUT>.t
 # novelia 文库版（出版社正式卷册，每本书一目录）
 python ebook.py wenku "https://n.novelia.cc/wenku/<WID>" --list
 python ebook.py wenku "https://n.novelia.cc/wenku/<WID>"
+python ebook.py wenku "https://n.novelia.cc/wenku/<WID>" --fix-volume-order  # 按标题真实卷号命名
 
 # 轻之国度（需在 config.json 配置 lk.username/password）
 python ebook.py lk "https://www.lightnovel.fun/<LKID>"
