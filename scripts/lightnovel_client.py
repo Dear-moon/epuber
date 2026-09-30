@@ -24,6 +24,12 @@ from typing import Any, Dict, Optional
 
 RS = b"\x1e"  # SignalR record separator (text/handshake records)
 
+# Server response latency is high and variable (measured 5-16s per chapter fetch), so a
+# 15s cap produced spurious timeouts that looked like outages. Allow generous headroom.
+HTTP_TIMEOUT = 30       # session exchange + negotiate
+HUB_TIMEOUT = 45        # single hub request (handshake/post/poll)
+INVOKE_DEADLINE = 90    # total budget for one invoke (several polls)
+
 
 class SignalRError(RuntimeError):
     """Lift the server's {Status, Msg} into an exception."""
@@ -262,12 +268,12 @@ class LightnovelClient:
 
     def _post_json(self, url, payload):
         r = self._curl.post(url, json=payload, impersonate=self.impersonate,
-                            verify=False, timeout=15)
+                            verify=False, timeout=HTTP_TIMEOUT)
         if r.status_code != 200:
             raise SignalRError(f"HTTP {r.status_code}: {r.text[:200]}", r.status_code)
         return r.json()
 
-    def _hub(self, url, method="post", body=None, headers=None, timeout=15):
+    def _hub(self, url, method="post", body=None, headers=None, timeout=HUB_TIMEOUT):
         h = dict(headers or {})
         if body is not None and not h.get("Content-Type"):
             h["Content-Type"] = "application/octet-stream"
@@ -295,7 +301,7 @@ class LightnovelClient:
                   headers={"Content-Type": "text/plain;charset=UTF-8"})
         return self
 
-    def _poll(self, timeout=15):
+    def _poll(self, timeout=HUB_TIMEOUT):
         r, body = self._hub(f"{self.hub}{self._q}", "get", timeout=timeout)
         if r == 204 or not body:
             return None
@@ -307,7 +313,7 @@ class LightnovelClient:
             self.connect()
         self._hub(f"{self.hub}{self._q}", "post", _frame(method, [params, {"UseGzip": True}]))
 
-        deadline = time.time() + 30
+        deadline = time.time() + INVOKE_DEADLINE
         while time.time() < deadline:
             body = self._poll()
             if not body:
@@ -363,7 +369,7 @@ def download_book(base: str, refresh_token: str, bid: int,
     if not bearer:
         # Obtain a session token with the same stack.
         r = curl.post(f"{base}/api/user/refresh_token", json={"token": refresh_token},
-                      impersonate="chrome124", verify=False, timeout=15)
+                      impersonate="chrome124", verify=False, timeout=HTTP_TIMEOUT)
         j = r.json()
         bearer = j.get("Response") or j.get("Token") or j.get("token")
     headers = {"Accept": "application/octet-stream, application/json",
