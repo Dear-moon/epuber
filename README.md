@@ -1,4 +1,4 @@
-# txt-to-epub
+# Eznovel
 
 > Multi-source web novel fetcher & EPUB converter with embedded font support.
 
